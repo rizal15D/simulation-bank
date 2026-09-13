@@ -1,0 +1,13 @@
+docs/*
+!docs/architecture.md
+!docs/database.md
+!docs/api.md
+!docs/IMPLEMENTATION_STATUS.md
+/target/
+/.tools/
+/.m2/
+/.idea/
+/.vscode/
+*.iml
+*.log
+.env
