@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: ${TEST_DB_URL:jdbc:postgresql://localhost:5433/ledgerbank_test}
+    username: ${TEST_DB_USERNAME:ledgerbank}
+    password: ${TEST_DB_PASSWORD:ledgerbank}
