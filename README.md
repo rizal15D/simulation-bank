@@ -31,6 +31,20 @@ Respons health: `{"status":"UP"}`. Flyway menjalankan migration otomatis saat ap
 
 macOS/Linux menggunakan perintah Docker yang sama, lalu `./mvnw spring-boot:run`.
 
+## Swagger UI dan OpenAPI
+
+Setelah aplikasi berjalan, buka:
+
+- Swagger UI: [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
+- OpenAPI JSON: [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs)
+- OpenAPI YAML: [http://localhost:8080/v3/api-docs.yaml](http://localhost:8080/v3/api-docs.yaml)
+
+Swagger mengelompokkan 10 endpoint ke Customers, Accounts, Transactions, Transfers, dan Health. Pilih endpoint lalu **Try it out** untuk mengisi request dan **Execute** untuk menjalankannya. Buat customer dan rekening terlebih dahulu, kemudian gunakan UUID hasil response pada request selanjutnya. Contoh UUID di schema merupakan placeholder.
+
+Operasi deposit, withdrawal, dan transfer dari Swagger mengubah database aplikasi. Endpoint belum memakai authentication dan setiap request uang yang berhasil menghasilkan transaksi baru.
+
+Definisi OpenAPI 3.0 dihasilkan dari controller/DTO menggunakan [springdoc-openapi 3.1.1 untuk Spring Boot 4](https://springdoc.org/getting-started.html). Model error dan metadata API berada di `common/config/OpenApiConfig.java`. Jika `PORT` diubah, sesuaikan port pada URL di atas.
+
 ## Konfigurasi
 
 | Variabel aplikasi | Default |

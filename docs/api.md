@@ -2,6 +2,8 @@
 
 Base URL development: `http://localhost:8080/api/v1`. Request dan response memakai JSON. ID customer/rekening/transaksi adalah UUID; path rekening memakai `accountId`, bukan nomor rekening. Semua endpoint belum memakai authentication.
 
+Dokumentasi interaktif tersedia pada `/swagger-ui.html`, dengan definisi OpenAPI pada `/v3/api-docs` (JSON) dan `/v3/api-docs.yaml` (YAML). Swagger memuat contoh request, schema response, batas pagination/amount, dan format error. Gunakan UUID customer/rekening yang benar dari response aplikasi saat mencoba endpoint.
+
 ## Endpoint
 
 | Method dan path | Input | Hasil sukses |

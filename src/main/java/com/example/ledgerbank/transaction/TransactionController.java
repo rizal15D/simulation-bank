@@ -1,5 +1,11 @@
 package com.example.ledgerbank.transaction;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -12,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
+@Tag(name = "Transactions", description = "Deposit, withdrawal, dan histori rekening")
 @RestController
 @RequestMapping("/api/v1/accounts/{accountId}")
 public class TransactionController {
@@ -25,22 +32,38 @@ public class TransactionController {
         this.history = history;
     }
 
+    @Operation(summary = "Deposit simulasi", description = "Menambah saldo rekening ACTIVE dan mencatat histori dalam satu database transaction.", responses = {
+            @ApiResponse(responseCode = "201", description = "Transaksi berhasil", useReturnTypeSchema = true),
+            @ApiResponse(responseCode = "400", ref = "#/components/responses/BadRequest"),
+            @ApiResponse(responseCode = "404", ref = "#/components/responses/NotFound"),
+            @ApiResponse(responseCode = "409", ref = "#/components/responses/Conflict"),
+            @ApiResponse(responseCode = "500", ref = "#/components/responses/InternalError")})
     @PostMapping("/deposit")
     @ResponseStatus(HttpStatus.CREATED)
     public TransactionResponse deposit(@PathVariable UUID accountId, @RequestBody AmountRequest request) {
         return deposits.deposit(accountId, request.amount());
     }
 
+    @Operation(summary = "Withdrawal simulasi", description = "Mengurangi saldo rekening ACTIVE. Saldo harus mencukupi; perubahan saldo dan histori bersifat atomik.", responses = {
+            @ApiResponse(responseCode = "201", description = "Transaksi berhasil", useReturnTypeSchema = true),
+            @ApiResponse(responseCode = "400", ref = "#/components/responses/BadRequest"),
+            @ApiResponse(responseCode = "404", ref = "#/components/responses/NotFound"),
+            @ApiResponse(responseCode = "409", ref = "#/components/responses/Conflict"),
+            @ApiResponse(responseCode = "500", ref = "#/components/responses/InternalError")})
     @PostMapping("/withdraw")
     @ResponseStatus(HttpStatus.CREATED)
     public TransactionResponse withdraw(@PathVariable UUID accountId, @RequestBody AmountRequest request) {
         return withdrawals.withdraw(accountId, request.amount());
     }
 
+    @Operation(summary = "Histori transaksi rekening", description = "Urutan createdAt DESC, lalu id DESC. Page dimulai dari nol; size 1 sampai 100.", responses = {
+            @ApiResponse(responseCode = "200", description = "Halaman histori transaksi", useReturnTypeSchema = true),
+            @ApiResponse(responseCode = "400", ref = "#/components/responses/BadRequest"),
+            @ApiResponse(responseCode = "404", ref = "#/components/responses/NotFound")})
     @GetMapping("/transactions")
     public TransactionHistoryResponse history(@PathVariable UUID accountId,
-                                              @RequestParam(defaultValue = "0") int page,
-                                              @RequestParam(defaultValue = "20") int size) {
+                                              @Parameter(description = "Nomor halaman", schema = @Schema(type = "integer", format = "int32", minimum = "0", defaultValue = "0")) @RequestParam(defaultValue = "0") int page,
+                                              @Parameter(description = "Jumlah transaksi per halaman", schema = @Schema(type = "integer", format = "int32", minimum = "1", maximum = "100", defaultValue = "20")) @RequestParam(defaultValue = "20") int size) {
         return history.history(accountId, page, size);
     }
 }

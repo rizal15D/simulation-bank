@@ -22,3 +22,15 @@ server:
   error:
     include-message: never
     include-stacktrace: never
+springdoc:
+  default-produces-media-type: application/json
+  api-docs:
+    version: OPENAPI_3_0
+  paths-to-match: /api/v1/**
+  override-with-generic-response: false
+  swagger-ui:
+    path: /swagger-ui.html
+    disable-swagger-default-url: true
+    tags-sorter: alpha
+    operations-sorter: alpha
+    doc-expansion: none

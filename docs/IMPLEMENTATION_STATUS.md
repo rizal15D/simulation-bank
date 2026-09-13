@@ -1,8 +1,8 @@
 # Status implementasi Milestone 1
 
-Verifikasi terakhir: 13 September 2026.
+Verifikasi terakhir: 13 September 2026 (termasuk Swagger/OpenAPI).
 
-Implementasi aplikasi dan pengujian PostgreSQL selesai. Satu kriteria lingkungan pada Definition of Done masih belum terverifikasi: menjalankan PostgreSQL melalui Docker di mesin ini, karena backend Docker/WSL tidak dapat dimulai (`Wsl/CallMsi/Install/REGDB_E_CLASSNOTREG`). File Compose sudah lulus validasi konfigurasi. Test database dijalankan pada PostgreSQL 18.6 portabel yang benar-benar berjalan, bukan database in-memory atau mock.
+Implementasi aplikasi dan pengujian PostgreSQL selesai. Satu kriteria lingkungan pada Definition of Done masih belum terverifikasi: menjalankan PostgreSQL melalui Docker di mesin ini, karena backend Docker/WSL tidak dapat dimulai pada verifikasi awal (`Wsl/CallMsi/Install/REGDB_E_CLASSNOTREG`). WSL 2.7.14 kemudian berhasil dipasang; verifikasi container setelah restart Windows belum dicatat. File Compose sudah lulus validasi konfigurasi. Test database dijalankan pada PostgreSQL 18.6 portabel yang benar-benar berjalan, bukan database in-memory atau mock.
 
 ## Hasil
 
@@ -10,7 +10,7 @@ Implementasi aplikasi dan pengujian PostgreSQL selesai. Satu kriteria lingkungan
 |---|---|
 | Build `mvnw -Pintegration verify` | Lulus, JAR berhasil dibuat |
 | Unit dan MVC | 60 test, 0 gagal, 0 error, 0 dilewati |
-| Integrasi PostgreSQL 18.6 | 12 test, 0 gagal, 0 error, 0 dilewati |
+| Integrasi PostgreSQL 18.6 dan OpenAPI | 14 test, 0 gagal, 0 error, 0 dilewati |
 | Flyway pada database development kosong | V1–V4 berhasil diterapkan |
 | Hibernate schema validation | Lulus saat startup aplikasi dan test |
 | JAR mandiri, health endpoint | HTTP 200, `{"status":"UP"}` |
@@ -32,6 +32,14 @@ Implementasi aplikasi dan pengujian PostgreSQL selesai. Satu kriteria lingkungan
 `AccountTransaction` mengimplementasikan entitas Transaction dalam spesifikasi. Cakupan repository yang disebut sebagai `TransactionRepositoryTest` diverifikasi terhadap PostgreSQL melalui `BankingApiIT` (pemisahan rekening, urutan/pagination, foreign key dan histori yang tersimpan), sehingga tidak ditambahkan mock test yang hanya mengulang implementasi repository.
 
 Rollback test memakai trigger PostgreSQL yang menolak credit history setelah header transfer dan debit history di-flush. Sebuah sequence memastikan titik kegagalan tersebut benar-benar tercapai. Setelah exception, test memeriksa saldo kedua rekening serta jumlah header dan histori kembali seperti sebelum transfer.
+
+## Swagger dan OpenAPI
+
+Swagger UI tersedia di `/swagger-ui.html`; definisi JSON di `/v3/api-docs` dan YAML di `/v3/api-docs.yaml`. Library springdoc-openapi 3.1.1 menghasilkan OpenAPI 3.0.1 dengan metadata LedgerBank, lima kelompok fitur, contoh request, schema response/error, serta batas amount dan pagination.
+
+Format OpenAPI 3.0 dipilih karena verifikasi pada stack ini menemukan schema numerik anotasi tidak sesuai saat memakai format 3.1. Test memeriksa amount dan balance sebagai number, parameter size sebagai integer dengan default 20 dan batas 1–100, serta HTTP 201 untuk operasi pembuatan/transaksi.
+
+`OpenApiIT` menambahkan dua test integrasi untuk kontrak 10 endpoint, schema error, Swagger UI, aset JavaScript/CSS, konfigurasi URL lokal, dan keluaran YAML. Total verifikasi kini 74 test: 60 unit/MVC ditambah 14 integrasi. Log verifikasi terbaru berada di `.tools/swagger-verify.log`.
 
 ## Penyesuaian dependency test
 
