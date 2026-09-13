@@ -56,7 +56,7 @@ Definisi OpenAPI 3.0 dihasilkan dari controller/DTO menggunakan [springdoc-opena
 
 Compose memakai `DB_PORT` (default `5432`) dan `DB_PASSWORD`. Kredensial default hanya untuk development. Port PostgreSQL dipublikasikan ke loopback. Image `postgres:18` menggunakan volume pada `/var/lib/postgresql`, sesuai [dokumentasi image PostgreSQL](https://hub.docker.com/_/postgres).
 
-`.env.example` dapat disalin menjadi `.env` untuk Compose. Spring Boot tidak otomatis membaca `.env`; ekspor variabel yang sama pada terminal aplikasi jika mengganti konfigurasi. Contoh:
+`.env.example` dapat disalin menjadi `.env` untuk Compose dan aplikasi. Saat dijalankan dari direktori proyek, Spring Boot membaca `.env` melalui `spring.config.import` sebagai file Java properties. Gunakan format `KEY=value` tanpa tanda kutip pembungkus atau komentar di akhir nilai; tulis komentar pada baris tersendiri. Environment variable pada terminal mengalahkan nilai `.env`. `DB_PORT` juga dipakai pada URL database default aplikasi; `DB_URL` dapat diisi untuk mengganti URL secara lengkap. Contoh override melalui terminal:
 
 ```powershell
 $env:DB_PORT = '55432'
