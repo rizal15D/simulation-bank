@@ -3,6 +3,8 @@ package com.example.ledgerbank.auth;
 import com.example.ledgerbank.common.exception.BusinessException;
 import com.example.ledgerbank.customer.Customer;
 import com.example.ledgerbank.customer.CustomerRepository;
+import com.example.ledgerbank.event.BankingEvent;
+import com.example.ledgerbank.event.BankingEventPublisher;
 import java.util.Locale;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
@@ -16,14 +18,16 @@ public class AuthService {
     private final CustomerRepository customers;
     private final PasswordEncoder passwords;
     private final AuthSessionService sessions;
+    private final BankingEventPublisher events;
     private final String dummyPasswordHash;
 
     public AuthService(AppUserRepository users, CustomerRepository customers,
-                       PasswordEncoder passwords, AuthSessionService sessions) {
+                       PasswordEncoder passwords, AuthSessionService sessions, BankingEventPublisher events) {
         this.users = users;
         this.customers = customers;
         this.passwords = passwords;
         this.sessions = sessions;
+        this.events = events;
         this.dummyPasswordHash = passwords.encode("timing-only-password-value");
     }
 
@@ -48,7 +52,9 @@ public class AuthService {
             throw new BusinessException("INVALID_CREDENTIALS", "Email or password is invalid", HttpStatus.UNAUTHORIZED);
         }
         try {
-            return sessions.create(user);
+            TokenResponse token = sessions.create(user);
+            events.publish(BankingEvent.userLogin(user.getId(), user.getCustomerId()));
+            return token;
         } catch (DataAccessException unavailable) {
             throw new BusinessException("AUTH_SERVICE_UNAVAILABLE", "Authentication session storage is unavailable",
                     HttpStatus.SERVICE_UNAVAILABLE);

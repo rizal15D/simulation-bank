@@ -13,6 +13,8 @@ import static org.mockito.Mockito.when;
 import com.example.ledgerbank.auth.BankingPrincipal;
 import com.example.ledgerbank.auth.UserRole;
 import com.example.ledgerbank.common.exception.BusinessException;
+import com.example.ledgerbank.event.BankingEvent;
+import com.example.ledgerbank.event.BankingEventPublisher;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Optional;
@@ -34,6 +36,7 @@ class IdempotentTransferServiceTest {
     @Mock private TransferRepository transfers;
     @Mock private TransferService core;
     @Mock private TransactionTemplate transaction;
+    @Mock private BankingEventPublisher events;
     private IdempotentTransferService service;
 
     private final BankingPrincipal actor = new BankingPrincipal(UUID.randomUUID(), UUID.randomUUID(),
@@ -45,7 +48,7 @@ class IdempotentTransferServiceTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
-        service = new IdempotentTransferService(redis, records, transfers, core, transaction,
+        service = new IdempotentTransferService(redis, records, transfers, core, transaction, events,
                 Duration.ofHours(24), Duration.ofSeconds(30));
         lenient().when(transaction.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
@@ -96,5 +99,24 @@ class IdempotentTransferServiceTest {
         assertThatThrownBy(() -> service.transfer(actor, key, request))
                 .isInstanceOf(BusinessException.class).extracting("code")
                 .isEqualTo("IDEMPOTENCY_REQUEST_IN_PROGRESS");
+    }
+
+    @Test
+    void failedCoreTransferPublishesSanitizedFailureEvent() {
+        String key = "transfer-key-004";
+        when(redis.get(actor.userId(), key)).thenReturn(Optional.empty());
+        when(redis.acquire(eq(actor.userId()), eq(key), any(), eq(Duration.ofSeconds(30)))).thenReturn(true);
+        when(records.findByActorIdAndIdempotencyKey(actor.userId(), key)).thenReturn(Optional.empty());
+        when(core.transfer(actor, source, destination, new BigDecimal("25.00"), "Lunch"))
+                .thenThrow(new BusinessException("INSUFFICIENT_BALANCE", "insufficient", org.springframework.http.HttpStatus.CONFLICT));
+
+        assertThatThrownBy(() -> service.transfer(actor, key, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("INSUFFICIENT_BALANCE");
+
+        ArgumentCaptor<BankingEvent> event = ArgumentCaptor.forClass(BankingEvent.class);
+        verify(events).publish(event.capture());
+        assertThat(event.getValue().eventType().name()).isEqualTo("TRANSFER_FAILED");
+        assertThat(event.getValue().metadata()).containsEntry("failureCode", "INSUFFICIENT_BALANCE");
     }
 }

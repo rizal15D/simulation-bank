@@ -9,15 +9,20 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.example.ledgerbank.common.exception.BusinessException;
+import com.example.ledgerbank.auth.BankingPrincipal;
+import com.example.ledgerbank.auth.UserRole;
 import com.example.ledgerbank.customer.Customer;
 import com.example.ledgerbank.customer.CustomerRepository;
 import com.example.ledgerbank.customer.CustomerStatus;
+import com.example.ledgerbank.event.BankingEvent;
+import com.example.ledgerbank.event.BankingEventPublisher;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -26,12 +31,13 @@ import org.springframework.test.util.ReflectionTestUtils;
 class AccountServiceTest {
     @Mock private AccountRepository accounts;
     @Mock private CustomerRepository customers;
+    @Mock private BankingEventPublisher events;
     private AccountService service;
     private final UUID customerId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        service = new AccountService(accounts, customers);
+        service = new AccountService(accounts, customers, events);
     }
 
     @Test
@@ -49,6 +55,28 @@ class AccountServiceTest {
         assertThat(first.currency()).isEqualTo("IDR");
         assertThat(first.status()).isEqualTo(AccountStatus.ACTIVE);
         assertThat(first.balance()).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void authenticatedCreatePublishesAccountCreatedEvent() {
+        UUID accountId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        BankingPrincipal actor = new BankingPrincipal(userId, customerId, "owner@example.com", UserRole.CUSTOMER);
+        when(customers.findById(customerId)).thenReturn(Optional.of(activeCustomer()));
+        when(accounts.nextAccountNumber()).thenReturn(42L);
+        when(accounts.saveAndFlush(any(Account.class))).thenAnswer(invocation -> {
+            Account account = invocation.getArgument(0);
+            ReflectionTestUtils.setField(account, "id", accountId);
+            return account;
+        });
+
+        service.create(actor, customerId);
+
+        ArgumentCaptor<BankingEvent> event = ArgumentCaptor.forClass(BankingEvent.class);
+        verify(events).publish(event.capture());
+        assertThat(event.getValue().actorId()).isEqualTo(userId);
+        assertThat(event.getValue().sourceCustomerId()).isEqualTo(customerId);
+        assertThat(event.getValue().resourceId()).isEqualTo(accountId);
     }
 
     @Test

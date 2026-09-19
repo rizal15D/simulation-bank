@@ -6,6 +6,8 @@ import com.example.ledgerbank.common.exception.BusinessException;
 import com.example.ledgerbank.customer.Customer;
 import com.example.ledgerbank.customer.CustomerRepository;
 import com.example.ledgerbank.customer.CustomerStatus;
+import com.example.ledgerbank.event.BankingEvent;
+import com.example.ledgerbank.event.BankingEventPublisher;
 import java.time.Year;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -20,25 +22,36 @@ import org.springframework.transaction.annotation.Transactional;
 public class AccountService {
     private final AccountRepository accounts;
     private final CustomerRepository customers;
+    private final BankingEventPublisher events;
 
-    public AccountService(AccountRepository accounts, CustomerRepository customers) {
+    public AccountService(AccountRepository accounts, CustomerRepository customers, BankingEventPublisher events) {
         this.accounts = accounts;
         this.customers = customers;
+        this.events = events;
     }
 
     public AccountResponse create(BankingPrincipal actor, UUID customerId) {
         OwnershipPolicy.requireOwnedCustomer(actor, customerId);
-        return create(customerId);
+        return create(actor, customerId, true);
     }
 
     AccountResponse create(UUID customerId) {
+        return create(null, customerId, false);
+    }
+
+    private AccountResponse create(BankingPrincipal actor, UUID customerId, boolean publishEvent) {
         Customer customer = requireCustomer(customerId);
         if (customer.getStatus() != CustomerStatus.ACTIVE) {
             throw new BusinessException("CUSTOMER_NOT_ACTIVE", "Customer must be active", HttpStatus.CONFLICT);
         }
         String accountNumber = String.format(Locale.ROOT, "LBK-%d-%08d",
                 Year.now(ZoneOffset.UTC).getValue(), accounts.nextAccountNumber());
-        return AccountResponse.from(accounts.saveAndFlush(new Account(customerId, accountNumber)));
+        Account account = accounts.saveAndFlush(new Account(customerId, accountNumber));
+        if (publishEvent) {
+            events.publish(BankingEvent.accountCreated(actor.userId(), customerId, account.getId(),
+                    account.getCurrency()));
+        }
+        return AccountResponse.from(account);
     }
 
     @Transactional(readOnly = true)

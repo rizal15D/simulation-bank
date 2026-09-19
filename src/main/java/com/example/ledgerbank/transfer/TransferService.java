@@ -6,6 +6,8 @@ import com.example.ledgerbank.auth.BankingPrincipal;
 import com.example.ledgerbank.auth.OwnershipPolicy;
 import com.example.ledgerbank.common.Money;
 import com.example.ledgerbank.common.exception.BusinessException;
+import com.example.ledgerbank.event.BankingEvent;
+import com.example.ledgerbank.event.BankingEventPublisher;
 import com.example.ledgerbank.transaction.AccountTransaction;
 import com.example.ledgerbank.transaction.TransactionRepository;
 import com.example.ledgerbank.transaction.TransactionType;
@@ -21,11 +23,14 @@ public class TransferService {
     private final AccountRepository accounts;
     private final TransferRepository transfers;
     private final TransactionRepository transactions;
+    private final BankingEventPublisher events;
 
-    public TransferService(AccountRepository accounts, TransferRepository transfers, TransactionRepository transactions) {
+    public TransferService(AccountRepository accounts, TransferRepository transfers,
+                           TransactionRepository transactions, BankingEventPublisher events) {
         this.accounts = accounts;
         this.transfers = transfers;
         this.transactions = transactions;
+        this.events = events;
     }
 
     @Transactional
@@ -78,6 +83,9 @@ public class TransferService {
                 amount, sourceBefore, source.getBalance()));
         transactions.saveAndFlush(new AccountTransaction(destination, transfer.getId(), TransactionType.TRANSFER_CREDIT,
                 amount, destinationBefore, destination.getBalance()));
+        events.publish(BankingEvent.transferCompleted(actor == null ? null : actor.userId(),
+                source.getCustomerId(), destination.getCustomerId(), transfer.getId(), sourceAccountId,
+                destinationAccountId, amount));
         return TransferResponse.from(transfer);
     }
 

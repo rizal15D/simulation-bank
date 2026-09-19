@@ -6,12 +6,16 @@ import org.springframework.amqp.core.Declarables;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.annotation.EnableRabbit;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
+import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
+import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
+@EnableRabbit
 public class RabbitMqConfig {
     public static final String BANKING_EXCHANGE = "ledgerbank.events";
     public static final String NOTIFICATION_QUEUE = "ledgerbank.notification";
@@ -37,5 +41,10 @@ public class RabbitMqConfig {
         Binding notificationBinding = BindingBuilder.bind(notification).to(exchange).with("transfer.*");
         Binding auditBinding = BindingBuilder.bind(audit).to(exchange).with("#");
         return new Declarables(exchange, notification, audit, notificationBinding, auditBinding);
+    }
+
+    @Bean
+    MessageConverter bankingEventMessageConverter() {
+        return new JacksonJsonMessageConverter();
     }
 }

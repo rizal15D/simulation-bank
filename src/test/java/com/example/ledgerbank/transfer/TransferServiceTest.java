@@ -4,6 +4,8 @@ import com.example.ledgerbank.account.Account;
 import com.example.ledgerbank.account.AccountRepository;
 import com.example.ledgerbank.account.AccountStatus;
 import com.example.ledgerbank.common.exception.BusinessException;
+import com.example.ledgerbank.event.BankingEvent;
+import com.example.ledgerbank.event.BankingEventPublisher;
 import com.example.ledgerbank.transaction.AccountTransaction;
 import com.example.ledgerbank.transaction.TransactionRepository;
 import com.example.ledgerbank.transaction.TransactionType;
@@ -34,7 +36,8 @@ class TransferServiceTest {
     private final AccountRepository accounts = mock(AccountRepository.class);
     private final TransferRepository transfers = mock(TransferRepository.class);
     private final TransactionRepository transactions = mock(TransactionRepository.class);
-    private final TransferService service = new TransferService(accounts, transfers, transactions);
+    private final BankingEventPublisher events = mock(BankingEventPublisher.class);
+    private final TransferService service = new TransferService(accounts, transfers, transactions, events);
     private final UUID sourceId = UUID.fromString("00000000-0000-0000-0000-000000000002");
     private final UUID destinationId = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private final Account source = account(sourceId, "100.00");
@@ -70,6 +73,7 @@ class TransferServiceTest {
         assertThat(credit.getAccountId()).isEqualTo(destinationId);
         assertThat(credit.getBalanceBefore()).isEqualByComparingTo("20.00");
         assertThat(credit.getBalanceAfter()).isEqualByComparingTo("45.50");
+        verify(events).publish(any(BankingEvent.class));
         InOrder locks = inOrder(accounts);
         locks.verify(accounts).findByIdForUpdate(destinationId);
         locks.verify(accounts).findByIdForUpdate(sourceId);

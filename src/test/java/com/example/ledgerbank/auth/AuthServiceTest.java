@@ -10,6 +10,8 @@ import static org.mockito.Mockito.when;
 import com.example.ledgerbank.common.exception.BusinessException;
 import com.example.ledgerbank.customer.Customer;
 import com.example.ledgerbank.customer.CustomerRepository;
+import com.example.ledgerbank.event.BankingEvent;
+import com.example.ledgerbank.event.BankingEventPublisher;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -28,12 +30,13 @@ class AuthServiceTest {
     @Mock private CustomerRepository customers;
     @Mock private PasswordEncoder passwords;
     @Mock private AuthSessionService sessions;
+    @Mock private BankingEventPublisher events;
     private AuthService service;
 
     @BeforeEach
     void setUp() {
         when(passwords.encode(anyString())).thenAnswer(invocation -> "HASH:" + invocation.getArgument(0));
-        service = new AuthService(users, customers, passwords, sessions);
+        service = new AuthService(users, customers, passwords, sessions, events);
     }
 
     @Test
@@ -75,6 +78,7 @@ class AuthServiceTest {
 
         assertThat(service.login(new LoginRequest("BUDI@example.com", "the-password"))).isSameAs(token);
         verify(sessions).create(user);
+        verify(events).publish(any(BankingEvent.class));
     }
 
     @Test

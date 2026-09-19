@@ -3,6 +3,8 @@ package com.example.ledgerbank.transfer;
 import com.example.ledgerbank.auth.BankingPrincipal;
 import com.example.ledgerbank.common.Money;
 import com.example.ledgerbank.common.exception.BusinessException;
+import com.example.ledgerbank.event.BankingEvent;
+import com.example.ledgerbank.event.BankingEventPublisher;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -30,13 +32,14 @@ public class IdempotentTransferService {
     private final TransferRepository transfers;
     private final TransferService transferService;
     private final TransactionTemplate transaction;
+    private final BankingEventPublisher events;
     private final Duration resultTtl;
     private final Duration lockTtl;
 
     public IdempotentTransferService(RedisTransferIdempotencyStore redis,
                                      TransferIdempotencyRepository idempotencyRecords,
                                      TransferRepository transfers, TransferService transferService,
-                                     TransactionTemplate transaction,
+                                     TransactionTemplate transaction, BankingEventPublisher events,
                                      @Value("${ledgerbank.idempotency.transfer-ttl}") Duration resultTtl,
                                      @Value("${ledgerbank.idempotency.lock-ttl}") Duration lockTtl) {
         this.redis = redis;
@@ -44,6 +47,7 @@ public class IdempotentTransferService {
         this.transfers = transfers;
         this.transferService = transferService;
         this.transaction = transaction;
+        this.events = events;
         this.resultTtl = resultTtl;
         this.lockTtl = lockTtl;
     }
@@ -81,17 +85,26 @@ public class IdempotentTransferService {
         }
 
         try {
-            TransferResponse result = transaction.execute(status -> {
-                TransferResponse existing = fromDatabase(actor.userId(), idempotencyKey, requestHash);
-                if (existing != null) {
-                    return existing;
-                }
-                TransferResponse created = transferService.transfer(actor, request.sourceAccountId(),
-                        request.destinationAccountId(), amount, request.description());
-                idempotencyRecords.saveAndFlush(new TransferIdempotency(actor.userId(), idempotencyKey,
-                        requestHash, created.id(), Instant.now().plus(resultTtl)));
-                return created;
-            });
+            TransferResponse result;
+            try {
+                result = transaction.execute(status -> {
+                    TransferResponse existing = fromDatabase(actor.userId(), idempotencyKey, requestHash);
+                    if (existing != null) {
+                        return existing;
+                    }
+                    TransferResponse created = transferService.transfer(actor, request.sourceAccountId(),
+                            request.destinationAccountId(), amount, request.description());
+                    idempotencyRecords.saveAndFlush(new TransferIdempotency(actor.userId(), idempotencyKey,
+                            requestHash, created.id(), Instant.now().plus(resultTtl)));
+                    return created;
+                });
+            } catch (RuntimeException failure) {
+                String failureCode = failure instanceof BusinessException business
+                        ? business.getCode() : "TRANSFER_PROCESSING_FAILED";
+                events.publish(BankingEvent.transferFailed(actor.userId(), request.sourceAccountId(),
+                        request.destinationAccountId(), failureCode));
+                throw failure;
+            }
             try {
                 redis.put(actor.userId(), idempotencyKey, requestHash, result.id(), resultTtl);
             } catch (DataAccessException cacheFailure) {
