@@ -1,15 +1,13 @@
 spring:
   config:
     activate:
-      on-profile: integration
+      on-profile: test
   datasource:
     url: ${TEST_DB_URL:jdbc:postgresql://localhost:5433/ledgerbank_test}
     username: ${TEST_DB_USERNAME:ledgerbank}
     password: ${TEST_DB_PASSWORD:ledgerbank}
     hikari:
       connection-init-sql: SET lock_timeout = '5s'
-  flyway:
-    locations: classpath:db/migration/postgresql
   data:
     redis:
       host: ${TEST_REDIS_HOST:localhost}
@@ -22,3 +20,6 @@ spring:
     port: ${TEST_RABBITMQ_PORT:5673}
     username: ${TEST_RABBITMQ_USERNAME:ledgerbank}
     password: ${TEST_RABBITMQ_PASSWORD:ledgerbank}
+    listener:
+      simple:
+        auto-startup: false

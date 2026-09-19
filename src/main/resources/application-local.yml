@@ -1,0 +1,26 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+    import: "optional:file:./.env[.properties]"
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:ledgerbank}}
+    username: ${DB_USERNAME:ledgerbank}
+    password: ${DB_PASSWORD:ledgerbank}
+    hikari:
+      connection-init-sql: SET lock_timeout = '5s'
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6380}
+      password: ${REDIS_PASSWORD:ledgerbank}
+      timeout: 2s
+      connect-timeout: 2s
+      repositories:
+        enabled: false
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5673}
+    username: ${RABBITMQ_USERNAME:ledgerbank}
+    password: ${RABBITMQ_PASSWORD:ledgerbank}
+    connection-timeout: 3s
