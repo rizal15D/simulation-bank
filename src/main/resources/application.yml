@@ -19,6 +19,7 @@ spring:
           time_zone: UTC
   flyway:
     enabled: true
+    locations: classpath:db/migration/postgresql
 server:
   port: ${PORT:8080}
   error:
