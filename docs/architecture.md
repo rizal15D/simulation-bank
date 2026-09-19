@@ -1,4 +1,4 @@
-# Arsitektur sampai batas Milestone 2
+# Arsitektur Milestone 2
 
 LedgerBank tetap berupa modular monolith dengan package-by-feature. PostgreSQL 18 adalah satu-satunya relational database untuk seluruh milestone. Redis dan RabbitMQ adalah infrastructure pendukung, bukan pengganti source of truth PostgreSQL.
 
@@ -14,8 +14,14 @@ flowchart TD
     Banking --> Idem[Idempotent transfer service]
     Idem --> Redis
     Idem --> PG
+    Banking --> Events[Transactional banking events]
+    Events -->|after commit| Rabbit[(RabbitMQ)]
+    Rabbit --> Notify[Notification consumer]
+    Rabbit --> Audit[Audit consumer]
+    Notify --> PG
+    Audit --> PG
     RabbitConfig[Rabbit topology initializer] --> Rabbit[(RabbitMQ)]
-    Flyway[Flyway V1-V6] --> PG
+    Flyway[Flyway V1-V7] --> PG
 ```
 
 ## Package dan tanggung jawab
@@ -27,6 +33,9 @@ flowchart TD
 | `account` | Pembukaan dan query rekening dengan ownership enforcement |
 | `transaction` | Deposit, withdrawal, histori, pessimistic account locking |
 | `transfer` | Transfer internal atomik, Redis lock/cache, durable idempotency record |
+| `event` | Event model dan publisher RabbitMQ setelah database commit |
+| `notification` | Idempotent transfer notification consumer dan persistence |
+| `audit` | Idempotent audit consumer untuk aktivitas kritis |
 | `common/config` | Spring Security filter chain, OpenAPI, RabbitMQ topology |
 | `common/exception` | Error contract yang aman dan konsisten |
 
@@ -118,10 +127,14 @@ ledgerbank.events (durable topic exchange)
   +-- #          -> ledgerbank.audit        (durable queue)
 ```
 
-Deklarasi dijalankan saat application startup melalui `RabbitAdmin`. Koneksi dan topology sudah aktif. Sesuai cutoff pekerjaan pengguna, event model, publisher, notification consumer, dan audit consumer belum termasuk implementasi ini.
+Deklarasi dijalankan saat application startup melalui `RabbitAdmin`. Event dikirim sebagai JSON dengan routing key `user.login`, `account.created`, `transfer.completed`, atau `transfer.failed`.
+
+Event transaksi diterbitkan melalui `TransactionalEventListener(AFTER_COMMIT)`. Transfer yang rollback tidak menghasilkan completion event dan idempotent replay tidak menerbitkan completion kedua. Publish failure setelah commit dicatat tanpa mengubah operasi database yang sudah sukses menjadi kegagalan palsu.
+
+`NotificationConsumer` menerima `transfer.*`, mengabaikan event selain completion, lalu menyimpan satu notification per customer berbeda. `AuditConsumer` menerima seluruh routing key. Unique constraint dan PostgreSQL `ON CONFLICT DO NOTHING` membuat kedua consumer aman terhadap redelivery.
 
 ## Konsistensi dengan Milestone 3
 
-Milestone 3 harus mempertahankan PostgreSQL, bukan menggantinya dengan MariaDB. Rencana integration test menggunakan PostgreSQL Testcontainers ditambah Redis dan RabbitMQ Testcontainers. Pessimistic locking yang sudah ada menjadi baseline untuk concurrency test, bukan alasan melewati test tersebut.
+Milestone 3 harus mempertahankan PostgreSQL, bukan menggantinya dengan MariaDB. Rencana integration test menggunakan PostgreSQL Testcontainers ditambah Redis dan RabbitMQ Testcontainers, termasuk verifikasi publication/consumption nyata. Pessimistic locking yang sudah ada menjadi baseline untuk concurrency test, bukan alasan melewati test tersebut.
 
 Observability, profiling, CI, performance baseline, dan Testcontainers belum ditarik maju ke pekerjaan ini agar batas milestone tetap jelas.

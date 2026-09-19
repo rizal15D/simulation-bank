@@ -14,6 +14,7 @@ Schema dibuat oleh Flyway dari `src/main/resources/db/migration/postgresql`. Hib
 | V4 | `account_transactions` dan indeks histori |
 | V5 | `app_users`, `transfer_idempotency`, constraint dan indeks |
 | V6 | Menyelaraskan tipe `request_hash` menjadi `VARCHAR(64)` |
+| V7 | `notifications`, `audit_logs`, idempotency constraint dan indeks consumer |
 
 V6 sengaja migration baru, bukan edit pada V5 yang sudah dapat diterapkan, agar checksum dan histori Flyway tetap aman.
 
@@ -27,6 +28,8 @@ V6 sengaja migration baru, bukan edit pada V5 yang sudah dapat diterapkan, agar 
 | `account_transactions` | Histori DEPOSIT/WITHDRAWAL/TRANSFER_DEBIT/TRANSFER_CREDIT dengan invariant delta saldo |
 | `app_users` | Credential BCrypt dan role; email normalized unik; CUSTOMER wajib memiliki customer, ADMIN tidak memiliki customer |
 | `transfer_idempotency` | Mapping durable actor + idempotency key ke request hash dan transfer ID |
+| `notifications` | Notification transfer per event/customer; unique untuk redelivery safety |
+| `audit_logs` | Audit event kritis; event ID unik, actor, action, resource, dan metadata non-secret |
 
 Semua primary key dan foreign key domain menggunakan UUID. Timestamp memakai `TIMESTAMPTZ` dan dipetakan ke Java `Instant`.
 
@@ -59,7 +62,13 @@ expires_at
 
 Unique constraint `(actor_id, idempotency_key)` memastikan satu makna untuk satu key milik actor. `transfer_id` juga unik dan memiliki foreign key ke `transfers`. Record dibuat dalam database transaction yang sama dengan transfer, sehingga tidak ada kondisi transfer committed tanpa durable mapping idempotency.
 
-`expires_at` mendokumentasikan retention/TTL logis dan memiliki indeks. Redis cache dapat kedaluwarsa lebih cepat atau hilang; database record tetap menjadi recovery source. Cleanup persistent record belum dijadwalkan pada cutoff Milestone 2 ini.
+`expires_at` mendokumentasikan retention/TTL logis dan memiliki indeks. Redis cache dapat kedaluwarsa lebih cepat atau hilang; database record tetap menjadi recovery source. Scheduled cleanup persistent record menjadi maintenance lanjutan.
+
+## Notification dan audit
+
+RabbitMQ memiliki delivery semantics at-least-once. Karena itu `notifications` memakai unique `(event_id, customer_id)` dan `audit_logs` memakai unique `event_id`. Consumer menulis dengan PostgreSQL `ON CONFLICT DO NOTHING`; redelivery event yang sama tidak membuat baris duplikat.
+
+Audit metadata disimpan sebagai JSON string di kolom `TEXT` dan hanya berasal dari metadata event yang sudah dibatasi. Password, bearer token, Redis key, dan infrastructure secret tidak menjadi bagian event atau audit row.
 
 ## Histori dan uang
 
@@ -80,10 +89,14 @@ Konfigurasi:
 
 ```text
 DB_URL
+DB_HOST
 DB_PORT
+DB_NAME
 DB_USERNAME
 DB_PASSWORD
 ```
+
+`application.yml` berisi konfigurasi bersama, `application-local.yml` memuat koneksi development dan `.env`, sedangkan `application-test.yml` memakai variabel `TEST_*` serta database khusus test.
 
 Jika memakai PostgreSQL lokal, aplikasi dapat diarahkan lewat `DB_URL`; Redis dan RabbitMQ tetap dapat dijalankan terpisah melalui Compose.
 

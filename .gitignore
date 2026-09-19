@@ -3,6 +3,9 @@ docs/*
 !docs/database.md
 !docs/api.md
 !docs/IMPLEMENTATION_STATUS.md
+!docs/security.md
+!docs/events.md
+!docs/redis.md
 /target/
 /.tools/
 /.m2/

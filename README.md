@@ -2,7 +2,7 @@
 
 LedgerBank adalah simulator core banking edukasional berbasis Java. Aplikasi menyediakan registrasi dan login, rekening IDR, deposit, withdrawal, transfer internal atomik, histori transaksi, ownership enforcement, dan perlindungan idempotency. Aplikasi tidak terhubung ke bank atau payment rail dan tidak ditujukan untuk transaksi finansial produksi.
 
-Implementasi saat ini mencakup Milestone 1 dan batas Milestone 2 yang diminta: authentication, authorization, account ownership, Swagger/OpenAPI, Redis, transfer idempotency, dan RabbitMQ aktif. Publish event, notification consumer, serta audit log belum dikerjakan.
+Implementasi mencakup Milestone 1 dan Milestone 2 lengkap: authentication, authorization, account ownership, Swagger/OpenAPI, Redis, transfer idempotency, RabbitMQ event publication, notification consumer, audit trail, dan environment profiles.
 
 ## Stack
 
@@ -10,7 +10,7 @@ Implementasi saat ini mencakup Milestone 1 dan batas Milestone 2 yang diminta: a
 - Spring MVC, Spring Data JPA, Bean Validation, Spring Security.
 - PostgreSQL 18 dan Flyway. PostgreSQL adalah satu-satunya relational database; tidak ada MariaDB.
 - Redis 8.2 untuk opaque authentication session dan transfer idempotency.
-- RabbitMQ 4.1 untuk durable exchange, queues, dan bindings.
+- RabbitMQ 4.1 untuk banking event, notification, dan audit processing asynchronous.
 - springdoc-openapi 3.1.1, JUnit Jupiter 6, Mockito, Spring MVC Test.
 
 ## Menjalankan aplikasi
@@ -42,7 +42,7 @@ docker compose up -d --wait redis rabbitmq
 .\mvnw.cmd spring-boot:run
 ```
 
-Flyway menjalankan migration V1-V6 saat startup dan Hibernate hanya memvalidasi schema.
+Flyway menjalankan migration V1-V7 saat startup dan Hibernate hanya memvalidasi schema.
 
 ## Authentication dan authorization
 
@@ -108,7 +108,7 @@ RabbitMQ mendeklarasikan topology durable saat aplikasi startup:
 | Binding | `transfer.*` ke notification |
 | Binding | `#` ke audit |
 
-Pada batas pekerjaan saat ini broker dan topology sudah aktif, tetapi aplikasi belum mem-publish event dan belum memiliki consumer.
+Event `USER_LOGIN`, `ACCOUNT_CREATED`, `TRANSFER_COMPLETED`, dan `TRANSFER_FAILED` dipublish sebagai JSON. Event transactional dikirim setelah database commit. Notification consumer menyimpan notification transfer untuk customer sumber dan tujuan; audit consumer menyimpan seluruh event. Kedua consumer memakai insert idempotent agar redelivery tidak menggandakan record.
 
 ## Konfigurasi
 
@@ -116,7 +116,7 @@ Lihat `.env.example`. Variabel utama:
 
 | Variabel | Default |
 |---|---|
-| `DB_URL` | `jdbc:postgresql://localhost:${DB_PORT}/ledgerbank` |
+| `DB_URL` | Dibentuk dari `DB_HOST`, `DB_PORT`, dan `DB_NAME` |
 | `DB_USERNAME` / `DB_PASSWORD` | `ledgerbank` |
 | `REDIS_PORT` / `REDIS_PASSWORD` | `6380` / `ledgerbank` |
 | `RABBITMQ_PORT` | `5673` |
@@ -129,6 +129,8 @@ Lihat `.env.example`. Variabel utama:
 
 Jangan commit secret. Mengubah password PostgreSQL pada Compose tidak mengubah password volume database yang sudah terinisialisasi.
 
+Konfigurasi umum berada di `application.yml`, koneksi development di `application-local.yml`, dan koneksi test di `application-test.yml`. Profile default adalah `local`; aktifkan profile lain melalui `SPRING_PROFILES_ACTIVE`.
+
 ## Test
 
 Unit dan MVC test:
@@ -137,7 +139,7 @@ Unit dan MVC test:
 .\mvnw.cmd test
 ```
 
-Verifikasi terakhir: 68 test, 0 failure, 0 error, 0 skipped. Selain itu, smoke test runtime memakai PostgreSQL 18, Redis, dan RabbitMQ untuk membuktikan auth, ownership, logout, OpenAPI, serta idempotency. Integration test berbasis Testcontainers untuk PostgreSQL, Redis, dan RabbitMQ merupakan target Milestone 3; tidak ada rencana menambahkan MariaDB.
+Verifikasi terakhir: 75 test, 0 failure, 0 error, 0 skipped. Smoke test runtime memakai PostgreSQL 18, Redis, dan RabbitMQ untuk membuktikan auth, ownership, logout, OpenAPI, idempotency, event publication, dua notification transfer, serta audit login/account/transfer. Integration test berbasis Testcontainers untuk PostgreSQL, Redis, dan RabbitMQ merupakan target Milestone 3; tidak ada rencana menambahkan MariaDB.
 
 ## Struktur
 
@@ -148,9 +150,12 @@ src/main/java/com/example/ledgerbank/
   account/        rekening dan ownership-aware query
   transaction/    deposit, withdrawal, histori
   transfer/       transfer atomik, idempotency Redis/PostgreSQL
+  event/          banking event model dan publisher pasca-commit
+  notification/   RabbitMQ consumer dan notification persistence
+  audit/          RabbitMQ consumer dan audit trail
   common/config/  Spring Security, OpenAPI, RabbitMQ topology
 src/main/resources/db/migration/postgresql/
-  V1-V6
+  V1-V7
 ```
 
 Dokumentasi lanjutan:
@@ -158,4 +163,7 @@ Dokumentasi lanjutan:
 - [Arsitektur](docs/architecture.md)
 - [Database](docs/database.md)
 - [Kontrak API](docs/api.md)
+- [Security](docs/security.md)
+- [Banking events](docs/events.md)
+- [Redis](docs/redis.md)
 - [Status implementasi](docs/IMPLEMENTATION_STATUS.md)

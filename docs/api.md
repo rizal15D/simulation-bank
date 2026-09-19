@@ -101,6 +101,8 @@ Perilaku retry:
 
 Redis menyimpan lock sementara dan cache result. PostgreSQL menyimpan fingerprint request dan transfer ID dalam transaksi database yang sama dengan transfer, sehingga retry tetap dapat dipulihkan jika cache result hilang. Saldo tidak didebit dua kali.
 
+Setelah transfer baru committed, aplikasi menerbitkan `TRANSFER_COMPLETED` ke RabbitMQ. Notification dan audit diproses asynchronous; response transfer tidak menunggu proses sampingan tersebut selesai. Retry idempotent yang mengembalikan transfer lama tidak menerbitkan completion event kedua. Milestone 2 belum menyediakan endpoint publik untuk membaca notification atau audit log.
+
 ## Contoh PowerShell
 
 ```powershell
@@ -189,7 +191,7 @@ Status penting:
 | 404 | `CUSTOMER_NOT_FOUND`, `ACCOUNT_NOT_FOUND` |
 | 409 | `EMAIL_ALREADY_EXISTS`, `ACCOUNT_NOT_ACTIVE`, `INSUFFICIENT_BALANCE`, `ACCOUNT_BUSY`, `IDEMPOTENCY_KEY_REUSED`, `IDEMPOTENCY_REQUEST_IN_PROGRESS` |
 | 422 | Dicadangkan dan didokumentasikan pada OpenAPI |
-| 503 | `IDEMPOTENCY_SERVICE_UNAVAILABLE` |
+| 503 | `AUTH_SERVICE_UNAVAILABLE`, `IDEMPOTENCY_SERVICE_UNAVAILABLE` |
 | 500 | `INTERNAL_ERROR` |
 
-Detail internal database, password, token, dan secret tidak dimasukkan ke error response.
+Detail internal database, password, token, dan secret tidak dimasukkan ke error response. DTO authentication juga meredaksi password dan bearer token dari representasi log.
