@@ -1,16 +1,24 @@
 package com.example.ledgerbank.common.exception;
 
+import com.example.ledgerbank.auth.BearerTokenAuthenticationFilter;
 import com.example.ledgerbank.common.HealthController;
 import com.example.ledgerbank.customer.CustomerController;
 import com.example.ledgerbank.customer.CustomerService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
+import org.springframework.web.method.support.HandlerMethodArgumentResolver;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.containsString;
@@ -20,9 +28,20 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest({CustomerController.class, HealthController.class})
+@AutoConfigureMockMvc(addFilters = false)
+@Import(GlobalExceptionHandlerTest.PrincipalResolverConfiguration.class)
 class GlobalExceptionHandlerTest {
     @Autowired private MockMvc mvc;
     @MockitoBean private CustomerService customers;
+    @MockitoBean private BearerTokenAuthenticationFilter bearerTokens;
+
+    @TestConfiguration
+    static class PrincipalResolverConfiguration implements WebMvcConfigurer {
+        @Override
+        public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
+            resolvers.add(new AuthenticationPrincipalArgumentResolver());
+        }
+    }
 
     @Test
     void routingMethodAndMediaErrorsKeepTheirHttpStatuses() throws Exception {
@@ -50,7 +69,7 @@ class GlobalExceptionHandlerTest {
     @Test
     void businessExceptionsRetainTheirDocumentedCodeAndStatus() throws Exception {
         UUID missing = UUID.randomUUID();
-        when(customers.get(missing)).thenThrow(new BusinessException(
+        when(customers.get(null, missing)).thenThrow(new BusinessException(
                 "CUSTOMER_NOT_FOUND", "Customer was not found", HttpStatus.NOT_FOUND));
         mvc.perform(get("/api/v1/customers/" + missing))
                 .andExpect(status().isNotFound())
@@ -62,7 +81,7 @@ class GlobalExceptionHandlerTest {
     @Test
     void unexpectedFailuresReturnSafeServerErrorWithoutInternalDetails() throws Exception {
         UUID customerId = UUID.randomUUID();
-        when(customers.get(customerId)).thenThrow(new IllegalStateException("internal database connection detail"));
+        when(customers.get(null, customerId)).thenThrow(new IllegalStateException("internal database connection detail"));
         mvc.perform(get("/api/v1/customers/" + customerId))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
