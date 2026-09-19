@@ -11,4 +11,9 @@ public record LoginRequest(
     public LoginRequest {
         email = email == null ? null : email.trim();
     }
+
+    @Override
+    public String toString() {
+        return "LoginRequest[email=" + email + ", password=[REDACTED]]";
+    }
 }

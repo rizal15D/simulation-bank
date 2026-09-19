@@ -17,4 +17,9 @@ public record RegisterRequest(
         fullName = fullName == null ? null : fullName.trim();
         email = email == null ? null : email.trim();
     }
+
+    @Override
+    public String toString() {
+        return "RegisterRequest[fullName=" + fullName + ", email=" + email + ", password=[REDACTED]]";
+    }
 }
