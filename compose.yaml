@@ -15,6 +15,20 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+  redis:
+    image: redis:8.2-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-ledgerbank}
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-ledgerbank}"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -a "$${REDIS_PASSWORD}" ping | grep PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 20
   postgres-test:
     image: postgres:18
     profiles: ["test"]
@@ -33,3 +47,4 @@ services:
       retries: 20
 volumes:
   postgres_data:
+  redis_data:

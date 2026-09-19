@@ -43,7 +43,8 @@ public class GlobalExceptionHandler {
         Throwable cause = exception;
         while (cause != null) {
             if (cause instanceof org.hibernate.exception.ConstraintViolationException violation
-                    && "uk_customers_email".equals(violation.getConstraintName())) {
+                    && ("uk_customers_email".equals(violation.getConstraintName())
+                    || "uk_app_users_email".equals(violation.getConstraintName()))) {
                 return error(HttpStatus.CONFLICT, "EMAIL_ALREADY_EXISTS", "Email is already registered");
             }
             cause = cause.getCause();
