@@ -31,6 +31,12 @@ spring:
       connect-timeout: 2s
       repositories:
         enabled: false
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5673}
+    username: ${RABBITMQ_USERNAME:ledgerbank}
+    password: ${RABBITMQ_PASSWORD:ledgerbank}
+    connection-timeout: 3s
 server:
   port: ${PORT:8080}
   error:

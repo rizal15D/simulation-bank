@@ -29,6 +29,22 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+  rabbitmq:
+    image: rabbitmq:4.1-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-ledgerbank}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-ledgerbank}
+    ports:
+      - "127.0.0.1:${RABBITMQ_PORT:-5673}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15673}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 45s
+      retries: 10
+      start_period: 60s
   postgres-test:
     image: postgres:18
     profiles: ["test"]
@@ -48,3 +64,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  rabbitmq_data:
