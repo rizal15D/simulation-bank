@@ -51,6 +51,9 @@ springdoc:
 ledgerbank:
   auth:
     session-ttl: ${AUTH_SESSION_TTL:PT8H}
+  idempotency:
+    transfer-ttl: ${TRANSFER_IDEMPOTENCY_TTL:PT24H}
+    lock-ttl: ${TRANSFER_IDEMPOTENCY_LOCK_TTL:PT30S}
   bootstrap-admin:
     email: ${APP_ADMIN_EMAIL:}
     password: ${APP_ADMIN_PASSWORD:}
