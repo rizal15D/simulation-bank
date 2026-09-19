@@ -1,101 +1,195 @@
-# API Milestone 1
+# API: security dan idempotency
 
-Base URL development: `http://localhost:8080/api/v1`. Request dan response memakai JSON. ID customer/rekening/transaksi adalah UUID; path rekening memakai `accountId`, bukan nomor rekening. Semua endpoint belum memakai authentication.
+Base URL development: `http://localhost:8080/api/v1`. Request dan response menggunakan JSON. Dokumentasi interaktif tersedia di `/swagger-ui.html`; spesifikasi tersedia sebagai JSON di `/v3/api-docs` dan YAML di `/v3/api-docs.yaml`.
 
-Dokumentasi interaktif tersedia pada `/swagger-ui.html`, dengan definisi OpenAPI pada `/v3/api-docs` (JSON) dan `/v3/api-docs.yaml` (YAML). Swagger memuat contoh request, schema response, batas pagination/amount, dan format error. Gunakan UUID customer/rekening yang benar dari response aplikasi saat mencoba endpoint.
+## Authentication
 
-## Endpoint
+Registrasi publik membuat user `CUSTOMER` beserta customer yang terhubung:
 
-| Method dan path | Input | Hasil sukses |
-|---|---|---|
-| `GET /health` | — | 200: `{ "status": "UP" }` |
-| `POST /customers` | fullName, email | 201: CustomerResponse |
-| `GET /customers/{customerId}` | UUID | 200: CustomerResponse |
-| `POST /accounts` | customerId | 201: AccountResponse |
-| `GET /accounts/{accountId}` | UUID | 200: AccountResponse |
-| `GET /customers/{customerId}/accounts` | UUID | 200: array AccountResponse |
-| `POST /accounts/{accountId}/deposit` | amount | 201: TransactionResponse |
-| `POST /accounts/{accountId}/withdraw` | amount | 201: TransactionResponse |
-| `POST /transfers` | sourceAccountId, destinationAccountId, amount, description opsional | 201: TransferResponse |
-| `GET /accounts/{accountId}/transactions` | page default 0, size default 20 | 200: TransactionHistoryResponse |
+```http
+POST /api/v1/auth/register
+Content-Type: application/json
 
-`fullName` wajib, maksimal 150 karakter; `email` wajib valid dan maksimal 254 karakter. Email disimpan lowercase dan unik. Customer harus ACTIVE untuk membuka rekening. Rekening dibuat otomatis dengan saldo 0, currency IDR dan status ACTIVE.
-
-Amount wajib positif, maksimum `99999999999999999.99`, dapat direpresentasikan tepat dengan dua angka pecahan. Input tidak dibulatkan. Deposit, withdrawal dan kedua rekening pada transfer harus ACTIVE. Withdrawal/transfer tidak boleh membuat saldo negatif. Description maksimal 255 karakter. Page minimal 0 dan size 1–100.
-
-## Contoh alur PowerShell
-
-Script berikut membuat customer, dua rekening, lalu melakukan deposit, withdrawal, dan transfer:
-
-```powershell
-$base = 'http://localhost:8080/api/v1'
-$customer = Invoke-RestMethod -Method Post -Uri "$base/customers" -ContentType 'application/json' -Body (@{
-    fullName = 'Budi Santoso'
-    email = 'budi@example.com'
-} | ConvertTo-Json)
-
-$accountBody = @{ customerId = $customer.id } | ConvertTo-Json
-$source = Invoke-RestMethod -Method Post -Uri "$base/accounts" -ContentType 'application/json' -Body $accountBody
-$destination = Invoke-RestMethod -Method Post -Uri "$base/accounts" -ContentType 'application/json' -Body $accountBody
-
-Invoke-RestMethod -Method Post -Uri "$base/accounts/$($source.id)/deposit" -ContentType 'application/json' -Body '{"amount":1000000}'
-Invoke-RestMethod -Method Post -Uri "$base/accounts/$($source.id)/withdraw" -ContentType 'application/json' -Body '{"amount":100000}'
-
-$transfer = Invoke-RestMethod -Method Post -Uri "$base/transfers" -ContentType 'application/json' -Body (@{
-    sourceAccountId = $source.id
-    destinationAccountId = $destination.id
-    amount = 250000
-    description = 'Transfer internal'
-} | ConvertTo-Json)
-
-Invoke-RestMethod "$base/accounts/$($source.id)"
-Invoke-RestMethod "$base/accounts/$($destination.id)"
-Invoke-RestMethod "$base/accounts/$($source.id)/transactions?page=0&size=20"
-```
-
-Saldo akhir sumber 650000 dan tujuan 250000. Gunakan email berbeda saat mengulang contoh; email yang sudah terdaftar menghasilkan 409. Setiap request uang sukses melakukan operasi baru karena idempotency belum tersedia.
-
-## Bentuk response
-
-CustomerResponse: `id`, `fullName`, `email`, `status`, `createdAt`, `updatedAt`.
-
-AccountResponse: `id`, `customerId`, `accountNumber`, `currency`, `balance`, `status`, `createdAt`, `updatedAt`.
-
-TransactionResponse:
-
-```json
 {
-  "id": "11111111-1111-1111-1111-111111111111",
-  "accountId": "22222222-2222-2222-2222-222222222222",
-  "transferId": null,
-  "transactionType": "DEPOSIT",
-  "amount": 100000.00,
-  "balanceBefore": 0.00,
-  "balanceAfter": 100000.00,
-  "createdAt": "2026-09-13T09:00:00Z"
+  "fullName": "Budi Santoso",
+  "email": "budi@example.com",
+  "password": "correct horse battery"
 }
 ```
 
-TransferResponse: `id`, `referenceNumber` (`TRF-<UUID>`), `sourceAccountId`, `destinationAccountId`, `amount`, `description`, `status` (`SUCCESS`), `createdAt`, `completedAt`.
+Password harus 12-72 printable ASCII characters. Password disimpan sebagai BCrypt hash dan tidak pernah dikembalikan.
 
-TransactionHistoryResponse: `content` (array TransactionResponse), `page`, `size`, `totalElements`, `totalPages`. Urutan terbaru dahulu (`createdAt DESC`, lalu `id DESC`). Rekening yang ada tetapi belum memiliki histori menghasilkan content kosong; rekening yang tidak ada menghasilkan 404.
+Login:
+
+```http
+POST /api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "budi@example.com",
+  "password": "correct horse battery"
+}
+```
+
+Response memuat `accessToken`, `tokenType`, `expiresAt`, dan user. Gunakan token untuk endpoint terlindungi:
+
+```http
+Authorization: Bearer <accessToken>
+```
+
+Token adalah opaque random token, bukan JWT. Session disimpan di Redis dengan TTL. Logout menghapus session:
+
+```http
+POST /api/v1/auth/logout
+Authorization: Bearer <accessToken>
+```
+
+Login dengan email atau password salah selalu menggunakan response generik 401 agar tidak membocorkan keberadaan akun.
+
+## Endpoint dan akses
+
+| Method dan path | Akses | Hasil sukses |
+|---|---|---|
+| `GET /health` | Publik | 200 health |
+| `POST /auth/register` | Publik | 201 UserResponse |
+| `POST /auth/login` | Publik | 200 TokenResponse |
+| `POST /auth/logout` | Authenticated | 204 |
+| `POST /customers` | ADMIN | 201 CustomerResponse |
+| `GET /customers/{customerId}` | Pemilik atau ADMIN | 200 CustomerResponse |
+| `POST /accounts` | CUSTOMER pemilik | 201 AccountResponse |
+| `GET /accounts/{accountId}` | Pemilik atau ADMIN | 200 AccountResponse |
+| `GET /customers/{customerId}/accounts` | Pemilik atau ADMIN | 200 array AccountResponse |
+| `POST /accounts/{accountId}/deposit` | CUSTOMER pemilik | 201 TransactionResponse |
+| `POST /accounts/{accountId}/withdraw` | CUSTOMER pemilik | 201 TransactionResponse |
+| `POST /transfers` | CUSTOMER pemilik rekening sumber | 201 TransferResponse |
+| `GET /accounts/{accountId}/transactions` | Pemilik atau ADMIN | 200 TransactionHistoryResponse |
+
+Pemeriksaan role dilakukan pada security filter chain. Pemeriksaan ownership juga dilakukan kembali di service setelah entity/rekening diambil atau dikunci. Karena itu mengganti UUID pada path/body tidak memberikan akses ke rekening milik customer lain.
+
+Admin opsional dibuat melalui `APP_ADMIN_EMAIL` dan `APP_ADMIN_PASSWORD` saat startup. Endpoint publik tidak menerima role dari client.
+
+## Transfer idempotency
+
+Transfer wajib memiliki header:
+
+```http
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+```
+
+Key harus 8-128 karakter dari huruf, angka, titik, underscore, colon, atau hyphen. Scope key adalah user/actor, bukan global.
+
+```http
+POST /api/v1/transfers
+Authorization: Bearer <accessToken>
+Idempotency-Key: <unique-key>
+Content-Type: application/json
+
+{
+  "sourceAccountId": "uuid",
+  "destinationAccountId": "uuid",
+  "amount": 250000.00,
+  "description": "Internal transfer"
+}
+```
+
+Perilaku retry:
+
+- key + actor + payload sama: 201 dan TransferResponse yang sama;
+- key + actor sama tetapi payload berbeda: 409 `IDEMPOTENCY_KEY_REUSED`;
+- request key yang sama masih berjalan: 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`;
+- Redis tidak dapat digunakan sebelum mutasi uang: 503 `IDEMPOTENCY_SERVICE_UNAVAILABLE`.
+
+Redis menyimpan lock sementara dan cache result. PostgreSQL menyimpan fingerprint request dan transfer ID dalam transaksi database yang sama dengan transfer, sehingga retry tetap dapat dipulihkan jika cache result hilang. Saldo tidak didebit dua kali.
+
+## Contoh PowerShell
+
+```powershell
+$base = 'http://localhost:8080/api/v1'
+
+$user = Invoke-RestMethod -Method Post -Uri "$base/auth/register" `
+  -ContentType 'application/json' `
+  -Body (@{
+    fullName = 'Budi Santoso'
+    email = 'budi@example.com'
+    password = 'correct horse battery'
+  } | ConvertTo-Json)
+
+$login = Invoke-RestMethod -Method Post -Uri "$base/auth/login" `
+  -ContentType 'application/json' `
+  -Body (@{
+    email = $user.email
+    password = 'correct horse battery'
+  } | ConvertTo-Json)
+
+$headers = @{ Authorization = "Bearer $($login.accessToken)" }
+
+$source = Invoke-RestMethod -Method Post -Uri "$base/accounts" `
+  -Headers $headers -ContentType 'application/json' `
+  -Body (@{ customerId = $user.customerId } | ConvertTo-Json)
+
+$destination = Invoke-RestMethod -Method Post -Uri "$base/accounts" `
+  -Headers $headers -ContentType 'application/json' `
+  -Body (@{ customerId = $user.customerId } | ConvertTo-Json)
+
+Invoke-RestMethod -Method Post -Uri "$base/accounts/$($source.id)/deposit" `
+  -Headers $headers -ContentType 'application/json' -Body '{"amount":1000000}'
+
+$transferHeaders = @{
+  Authorization = "Bearer $($login.accessToken)"
+  'Idempotency-Key' = [guid]::NewGuid().ToString()
+}
+
+$transferBody = @{
+  sourceAccountId = $source.id
+  destinationAccountId = $destination.id
+  amount = 250000
+  description = 'Internal transfer'
+} | ConvertTo-Json
+
+$first = Invoke-RestMethod -Method Post -Uri "$base/transfers" `
+  -Headers $transferHeaders -ContentType 'application/json' -Body $transferBody
+
+$retry = Invoke-RestMethod -Method Post -Uri "$base/transfers" `
+  -Headers $transferHeaders -ContentType 'application/json' -Body $transferBody
+
+$first.id -eq $retry.id
+```
+
+Baris terakhir menghasilkan `True`; saldo sumber hanya berkurang sekali.
+
+## Aturan input
+
+- `fullName`: wajib, maksimum 150 karakter.
+- `email`: wajib valid, maksimum 254 karakter, dinormalisasi lowercase dan unik.
+- `amount`: positif, maksimum `99999999999999999.99`, maksimum dua angka pecahan.
+- Deposit, withdrawal, serta kedua rekening transfer harus ACTIVE.
+- Withdrawal/transfer tidak boleh membuat saldo negatif.
+- Description transfer maksimum 255 karakter.
+- Histori: `page >= 0`, `1 <= size <= 100`; default 0 dan 20.
 
 ## Error
+
+Semua error aplikasi menggunakan bentuk:
 
 ```json
 {
   "code": "INSUFFICIENT_BALANCE",
   "message": "Account balance is insufficient",
-  "timestamp": "2026-09-13T09:00:00Z"
+  "timestamp": "2026-09-19T03:00:00Z"
 }
 ```
 
-| Status | Code |
+Status penting:
+
+| Status | Contoh code |
 |---|---|
-| 400 | `INVALID_AMOUNT`, `SAME_ACCOUNT`, `INVALID_PAGINATION`, `VALIDATION_ERROR`, `INVALID_REQUEST` |
+| 400 | `VALIDATION_ERROR`, `INVALID_REQUEST`, `INVALID_AMOUNT`, `INVALID_IDEMPOTENCY_KEY`, `SAME_ACCOUNT` |
+| 401 | `UNAUTHORIZED` |
+| 403 | `FORBIDDEN` |
 | 404 | `CUSTOMER_NOT_FOUND`, `ACCOUNT_NOT_FOUND` |
-| 409 | `EMAIL_ALREADY_EXISTS`, `CUSTOMER_NOT_ACTIVE`, `ACCOUNT_NOT_ACTIVE`, `INSUFFICIENT_BALANCE`, `BALANCE_LIMIT_EXCEEDED`, `CURRENCY_MISMATCH`, `ACCOUNT_BUSY`, `DATA_CONFLICT` |
-| 404/405/415 dan error request framework lain | `REQUEST_ERROR` |
+| 409 | `EMAIL_ALREADY_EXISTS`, `ACCOUNT_NOT_ACTIVE`, `INSUFFICIENT_BALANCE`, `ACCOUNT_BUSY`, `IDEMPOTENCY_KEY_REUSED`, `IDEMPOTENCY_REQUEST_IN_PROGRESS` |
+| 422 | Dicadangkan dan didokumentasikan pada OpenAPI |
+| 503 | `IDEMPOTENCY_SERVICE_UNAVAILABLE` |
 | 500 | `INTERNAL_ERROR` |
 
-Error validasi DTO dapat muncul sebelum validasi domain. Detail internal database tidak dikirim kepada client. Operasi finansial yang gagal di dalam service me-rollback seluruh perubahan saldo dan histori.
+Detail internal database, password, token, dan secret tidak dimasukkan ke error response.

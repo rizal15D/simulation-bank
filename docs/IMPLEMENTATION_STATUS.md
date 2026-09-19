@@ -1,72 +1,117 @@
-# Status implementasi Milestone 1
+# Status implementasi: Milestone 2 sampai RabbitMQ aktif
 
-Verifikasi terakhir: 13 September 2026 (termasuk Swagger/OpenAPI).
+Verifikasi terakhir: 19 September 2026.
 
-Implementasi aplikasi dan pengujian PostgreSQL selesai. Satu kriteria lingkungan pada Definition of Done masih belum terverifikasi: menjalankan PostgreSQL melalui Docker di mesin ini, karena backend Docker/WSL tidak dapat dimulai pada verifikasi awal (`Wsl/CallMsi/Install/REGDB_E_CLASSNOTREG`). WSL 2.7.14 kemudian berhasil dipasang; verifikasi container setelah restart Windows belum dicatat. File Compose sudah lulus validasi konfigurasi. Test database dijalankan pada PostgreSQL 18.6 portabel yang benar-benar berjalan, bukan database in-memory atau mock.
+Scope pekerjaan berhenti tepat pada kriteria pengguna berikut:
 
-## Hasil
+- authentication berjalan;
+- authorization berjalan;
+- account ownership aman;
+- Swagger/OpenAPI tersedia;
+- Redis aktif;
+- transfer memiliki idempotency protection;
+- RabbitMQ aktif.
+
+Database yang digunakan hanya PostgreSQL 18. MariaDB tidak ditambahkan ke dependency, migration, Compose, maupun rencana Testcontainers.
+
+## Hasil verifikasi
 
 | Pemeriksaan | Hasil |
 |---|---|
-| Build `mvnw -Pintegration verify` | Lulus, JAR berhasil dibuat |
-| Unit dan MVC | 60 test, 0 gagal, 0 error, 0 dilewati |
-| Integrasi PostgreSQL 18.6 dan OpenAPI | 14 test, 0 gagal, 0 error, 0 dilewati |
-| Flyway pada database development kosong | V1–V4 berhasil diterapkan |
-| Hibernate schema validation | Lulus saat startup aplikasi dan test |
-| JAR mandiri, health endpoint | HTTP 200, `{"status":"UP"}` |
-| `docker compose --profile test config --quiet` | Lulus |
-| Menjalankan container PostgreSQL 18 | Belum terverifikasi: Docker/WSL lokal bermasalah |
+| `mvnw test` | 68 test, 0 failure, 0 error, 0 skipped |
+| Flyway PostgreSQL | V1-V6 tervalidasi dan diterapkan |
+| Hibernate schema validation | Lulus saat startup |
+| Application startup | Lulus pada Java 25 / Spring Boot 4.1.1 |
+| Health | HTTP 200, status UP |
+| Endpoint terlindungi tanpa token | HTTP 401 |
+| Cross-customer account read | HTTP 403 |
+| Logout | 204, token lama kemudian 401 |
+| Missing registration password | HTTP 400 |
+| OpenAPI | 3.0.1, 13 path, bearer scheme |
+| Redis | Container healthy, authenticated PING=PONG, session key ber-TTL terbentuk |
+| Idempotency retry | Transfer ID sama, saldo hanya berubah satu kali |
+| Idempotency payload conflict | HTTP 409 |
+| RabbitMQ | Container healthy dan aplikasi terkoneksi ke port 5673 |
+| Rabbit topology | Durable exchange, dua durable queue, dua bindings tersedia |
 
-## Cakupan yang selesai
+Smoke transfer menggunakan saldo awal 100.00. Request pertama memindahkan 25.00, retry dengan key/payload sama mengembalikan transfer ID yang sama, dan saldo akhir terbukti 75.00/25.00. Reuse key dengan amount berbeda menghasilkan 409.
 
-- Bootstrap Java 25/Spring Boot 4.1.1, Maven Wrapper, health endpoint.
-- PostgreSQL 18, konfigurasi datasource, Compose development/test, Flyway V1–V4.
-- Customer: create/get, validasi, email unik yang dinormalisasi.
-- Account: create/get/list, nomor otomatis, IDR, saldo awal nol, aturan status/saldo.
-- Deposit dan withdrawal dengan histori atomik.
-- Transfer internal dengan satu header dan dua catatan debit/credit.
-- Histori per rekening dengan pagination dan urutan deterministik.
-- Penanganan error terpusat dan validasi request/uang.
-- README, arsitektur, schema database, kontrak API, dan histori commit per perubahan logis.
+## Implementasi security
 
-`AccountTransaction` mengimplementasikan entitas Transaction dalam spesifikasi. Cakupan repository yang disebut sebagai `TransactionRepositoryTest` diverifikasi terhadap PostgreSQL melalui `BankingApiIT` (pemisahan rekening, urutan/pagination, foreign key dan histori yang tersimpan), sehingga tidak ditambahkan mock test yang hanya mengulang implementasi repository.
+- Register/login/logout dengan opaque bearer token.
+- Password BCrypt strength 12 dan validasi 12-72 printable ASCII.
+- Session Redis default delapan jam; Redis key memakai SHA-256 token, bukan token mentah.
+- Role `CUSTOMER` dan `ADMIN`.
+- Public registration tidak dapat memilih role.
+- Optional bootstrap admin melalui environment.
+- JSON 401 dan 403; HTTP Basic, form login, CSRF, dan server HTTP session dinonaktifkan.
+- Ownership diperiksa di backend service untuk customer, account, deposit, withdrawal, transfer source, dan transaction history.
+- Admin read-only untuk data operasional; mutasi uang hanya untuk CUSTOMER pemilik.
 
-Rollback test memakai trigger PostgreSQL yang menolak credit history setelah header transfer dan debit history di-flush. Sebuah sequence memastikan titik kegagalan tersebut benar-benar tercapai. Setelah exception, test memeriksa saldo kedua rekening serta jumlah header dan histori kembali seperti sebelum transfer.
+## Implementasi idempotency
 
-## Swagger dan OpenAPI
+- Header `Idempotency-Key` wajib pada transfer.
+- Request fingerprint stabil mencakup actor, source, destination, normalized amount, dan description.
+- Redis cache result ber-TTL dan lock `SET NX` ber-TTL.
+- Lock release menggunakan compare-and-delete Lua script.
+- PostgreSQL `transfer_idempotency` menjadi durable recovery record.
+- Transfer, histori debit/credit, dan idempotency record berada dalam satu database transaction.
+- Redis unavailable sebelum mutasi menghasilkan 503.
+- Redis cache write gagal setelah commit tidak membatalkan transfer; retry dipulihkan dari PostgreSQL.
 
-Swagger UI tersedia di `/swagger-ui.html`; definisi JSON di `/v3/api-docs` dan YAML di `/v3/api-docs.yaml`. Library springdoc-openapi 3.1.1 menghasilkan OpenAPI 3.0.1 dengan metadata LedgerBank, lima kelompok fitur, contoh request, schema response/error, serta batas amount dan pagination.
+## Infrastructure
 
-Format OpenAPI 3.0 dipilih karena verifikasi pada stack ini menemukan schema numerik anotasi tidak sesuai saat memakai format 3.1. Test memeriksa amount dan balance sebagai number, parameter size sebagai integer dengan default 20 dan batas 1–100, serta HTTP 201 untuk operasi pembuatan/transaksi.
+Compose menyediakan:
 
-`OpenApiIT` menambahkan dua test integrasi untuk kontrak 10 endpoint, schema error, Swagger UI, aset JavaScript/CSS, konfigurasi URL lokal, dan keluaran YAML. Total verifikasi kini 74 test: 60 unit/MVC ditambah 14 integrasi. Log verifikasi terbaru berada di `.tools/swagger-verify.log`.
-
-## Penyesuaian dependency test
-
-JUnit Jupiter 6.0.3 mengikuti dependency management Spring Boot 4.1.1. Pin JUnit 5 dari spesifikasi awal menghasilkan `NoSuchMethodError` saat SpringExtension berjalan. Versi dibiarkan dikelola Spring Boot karena [Spring Framework 7 memerlukan JUnit Jupiter 6+](https://docs.spring.io/spring-framework/reference/testing/testcontext-framework/support-classes.html). Catatan stack M1 lokal telah diselaraskan.
-
-## Reproduksi verifikasi
-
-Jalur normal setelah Docker/WSL siap ada di [README](../README.md). Untuk verifikasi sesi ini, PostgreSQL 18.6 dari [paket binary Zonky](https://github.com/zonkyio/embedded-postgres-binaries) diunduh ke `.tools/` melalui Maven Central. Direktori runtime, data dan cache tidak masuk Git. Database development `ledgerbank` dan test `ledgerbank_test` berada pada cluster port 55432 yang hanya menerima koneksi loopback.
-
-Aplikasi uji dan cluster portabel dihentikan setelah verifikasi. Jika memakai workspace sesi ini, jalankan kembali:
-
-```powershell
-& .\.tools\postgres\bin\pg_ctl.exe -D "$PWD\.tools\pgdata" -l "$PWD\.tools\postgres.log" -o '-h 127.0.0.1 -p 55432' -w start
-$env:DB_URL = 'jdbc:postgresql://127.0.0.1:55432/ledgerbank'
-$env:TEST_DB_URL = 'jdbc:postgresql://127.0.0.1:55432/ledgerbank_test'
-.\mvnw.cmd -Pintegration verify
-.\mvnw.cmd spring-boot:run
+```text
+postgres:18
+redis:8.2-alpine
+rabbitmq:4.1-management-alpine
+postgres:18 profile test
 ```
 
-User/password lokal tetap `ledgerbank`. Setelah menghentikan aplikasi dengan Ctrl+C:
+Redis dan RabbitMQ project berjalan healthy pada verifikasi. PostgreSQL Compose project tidak dijalankan karena port 5432 sudah dipakai PostgreSQL 18.6 lokal; aplikasi benar-benar terkoneksi ke PostgreSQL lokal tersebut. Tidak ada process/database lokal yang dihentikan atau dihapus.
 
-```powershell
-& .\.tools\postgres\bin\pg_ctl.exe -D "$PWD\.tools\pgdata" -m fast -w stop
+RabbitMQ topology:
+
+```text
+ledgerbank.events (topic, durable)
+  transfer.* -> ledgerbank.notification (durable)
+  #          -> ledgerbank.audit (durable)
 ```
 
-Bukti sesi lokal tersedia pada `target/surefire-reports/`, `target/failsafe-reports/`, `.tools/integration-test.log`, dan `.tools/app-smoke.log`; semuanya merupakan output lokal yang tidak masuk Git.
+Topology dideklarasikan melalui `RabbitAdmin.initialize()` pada application runner, sehingga verifikasi startup mencakup koneksi broker nyata.
 
-## Batas milestone
+## Test yang ditambahkan
 
-Authentication, authorization, idempotency, audit operator, account freeze API, dan workflow interbank belum termasuk implementasi M1. Tidak ada klaim penggunaan produksi atau koneksi BI-FAST. Kriteria menjalankan PostgreSQL dalam Docker perlu diulang setelah masalah WSL mesin diselesaikan.
+- `OwnershipPolicyTest`
+- `AuthServiceTest`
+- `IdempotentTransferServiceTest`
+- penyesuaian MVC exception test terhadap authentication principal
+
+Test mencakup registration/hash/link customer, login dan generic credential failure, ownership rules, idempotent replay, payload conflict, dan concurrent duplicate-in-progress.
+
+## Batas yang sengaja belum dikerjakan
+
+Definition of Done penuh pada dokumen Milestone 2 masih memiliki tahap setelah RabbitMQ aktif. Sesuai instruksi cutoff, item berikut belum diimplementasikan:
+
+- banking event model dan transfer event publisher;
+- notification consumer dan notification persistence;
+- audit log;
+- environment profile split tambahan;
+- Testcontainers dan integration test M2;
+- observability/performance/CI Milestone 3.
+
+Queue notification dan audit sudah tersedia, tetapi belum ada publisher/consumer. Dokumentasi tidak mengklaim event sudah diproses.
+
+## Keselarasan milestone
+
+Milestone 1 tetap utuh: transfer core, histori, PostgreSQL transaction, rollback, dan pessimistic locking dipertahankan. Milestone 2 menambah security/idempotency sebagai wrapper dan policy, bukan menduplikasi mutation logic.
+
+Untuk Milestone 3:
+
+- gunakan PostgreSQL Testcontainers, bukan MariaDB;
+- tambahkan Redis dan RabbitMQ Testcontainers;
+- lanjutkan concurrency test dari locking yang sudah ada;
+- tambahkan event publication test hanya setelah publisher dikerjakan;
+- pertahankan ownership dan idempotency sebagai area coverage kritis.
