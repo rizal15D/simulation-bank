@@ -6,6 +6,8 @@ docs/*
 !docs/security.md
 !docs/events.md
 !docs/redis.md
+!docs/performance/
+!docs/performance/**
 /target/
 /.tools/
 /.m2/

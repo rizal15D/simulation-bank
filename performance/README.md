@@ -56,7 +56,8 @@ Gunakan metrik khusus berikut untuk baseline karena metrik HTTP bawaan juga menc
 warm-up:
 
 - `ledgerbank_latency`: average, p50, p95, p99, maksimum, dan jumlah request measurement.
-- `ledgerbank_requests`: jumlah request measurement untuk menghitung throughput.
+- `ledgerbank_requests`: jumlah request measurement; hitung throughput sebagai `count / DURATION`
+  karena rate counter pada summary dibagi terhadap seluruh lifecycle k6, termasuk setup dan warm-up.
 - `ledgerbank_errors`: error rate response measurement.
 
 Setup membuat dua pasangan rekening per VU. Masing-masing VU transfer mendapat pasangan sendiri
