@@ -539,10 +539,56 @@ class BankingApiIT extends AbstractIntegrationTest {
                 "SELECT count(*) FROM account_transactions WHERE transaction_type = 'WITHDRAWAL'", Long.class));
     }
 
+    @Test
+    void concurrentTransfersCannotOverdrawSourceAccount() throws Exception {
+        String source = newAccount();
+        String firstDestination = newAccount();
+        String secondDestination = newAccount();
+        assertEquals(201, amount(source, "deposit", "100").status());
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> concurrentTransfer(source, firstDestination, "80",
+                    UUID.randomUUID().toString(), ready, start));
+            var second = executor.submit(() -> concurrentTransfer(source, secondDestination, "80",
+                    UUID.randomUUID().toString(), ready, start));
+            try {
+                assertTrue(ready.await(10, TimeUnit.SECONDS));
+            } finally {
+                start.countDown();
+            }
+            List<ApiResponse> responses = List.of(
+                    first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+            assertEquals(1, responses.stream().filter(response -> response.status() == 201).count());
+            assertEquals(1, responses.stream().filter(response -> response.status() == 409
+                    && "INSUFFICIENT_BALANCE".equals(response.body().get("code"))).count());
+        }
+
+        assertBalance(source, "20");
+        BigDecimal destinationTotal = jdbc.queryForObject("""
+                SELECT sum(balance) FROM accounts WHERE id IN (?, ?)
+                """, BigDecimal.class, UUID.fromString(firstDestination), UUID.fromString(secondDestination));
+        assertMoney("80", destinationTotal);
+        assertEquals(1L, count("transfers"));
+        assertEquals(3L, count("account_transactions"));
+        assertEquals(1L, jdbc.queryForObject("""
+                SELECT count(*) FROM account_transactions
+                WHERE account_id = ? AND transaction_type = 'TRANSFER_DEBIT'
+                """, Long.class, UUID.fromString(source)));
+    }
+
     private int concurrentWithdrawal(String accountId, CountDownLatch ready, CountDownLatch start) throws Exception {
         ready.countDown();
         assertTrue(start.await(10, TimeUnit.SECONDS));
         return amount(accountId, "withdraw", "80").status();
+    }
+
+    private ApiResponse concurrentTransfer(String source, String destination, String amount, String idempotencyKey,
+                                           CountDownLatch ready, CountDownLatch start) throws Exception {
+        ready.countDown();
+        assertTrue(start.await(10, TimeUnit.SECONDS));
+        return transfer(source, destination, amount, idempotencyKey);
     }
 
     private String customer(String name, String email) throws Exception {
