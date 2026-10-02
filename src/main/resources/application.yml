@@ -16,6 +16,8 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration/postgresql
+  rabbitmq:
+    publisher-confirm-type: simple
 server:
   port: ${PORT:8080}
   error:
@@ -39,6 +41,15 @@ ledgerbank:
   idempotency:
     transfer-ttl: ${TRANSFER_IDEMPOTENCY_TTL:PT24H}
     lock-ttl: ${TRANSFER_IDEMPOTENCY_LOCK_TTL:PT30S}
+  outbox:
+    batch-size: ${OUTBOX_BATCH_SIZE:50}
+    poll-interval: ${OUTBOX_POLL_INTERVAL:PT0.5S}
+    max-attempts: ${OUTBOX_MAX_ATTEMPTS:8}
+    initial-backoff: ${OUTBOX_INITIAL_BACKOFF:PT1S}
+    max-backoff: ${OUTBOX_MAX_BACKOFF:PT1M}
+    confirm-timeout: ${OUTBOX_CONFIRM_TIMEOUT:PT5S}
+    retention: ${OUTBOX_RETENTION:P7D}
+    cleanup-interval: ${OUTBOX_CLEANUP_INTERVAL:PT1H}
   bootstrap-admin:
     email: ${APP_ADMIN_EMAIL:}
     password: ${APP_ADMIN_PASSWORD:}
