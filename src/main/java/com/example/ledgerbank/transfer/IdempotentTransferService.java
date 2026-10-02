@@ -3,6 +3,7 @@ package com.example.ledgerbank.transfer;
 import com.example.ledgerbank.auth.BankingPrincipal;
 import com.example.ledgerbank.common.Money;
 import com.example.ledgerbank.common.exception.BusinessException;
+import com.example.ledgerbank.common.observability.BankingMetrics;
 import com.example.ledgerbank.event.BankingEvent;
 import com.example.ledgerbank.event.BankingEventPublisher;
 import java.math.BigDecimal;
@@ -33,6 +34,7 @@ public class IdempotentTransferService {
     private final TransferService transferService;
     private final TransactionTemplate transaction;
     private final BankingEventPublisher events;
+    private final BankingMetrics metrics;
     private final Duration resultTtl;
     private final Duration lockTtl;
 
@@ -40,6 +42,7 @@ public class IdempotentTransferService {
                                      TransferIdempotencyRepository idempotencyRecords,
                                      TransferRepository transfers, TransferService transferService,
                                      TransactionTemplate transaction, BankingEventPublisher events,
+                                     BankingMetrics metrics,
                                      @Value("${ledgerbank.idempotency.transfer-ttl}") Duration resultTtl,
                                      @Value("${ledgerbank.idempotency.lock-ttl}") Duration lockTtl) {
         this.redis = redis;
@@ -48,11 +51,25 @@ public class IdempotentTransferService {
         this.transferService = transferService;
         this.transaction = transaction;
         this.events = events;
+        this.metrics = metrics;
         this.resultTtl = resultTtl;
         this.lockTtl = lockTtl;
     }
 
     public TransferResponse transfer(BankingPrincipal actor, String idempotencyKey, TransferRequest request) {
+        var sample = metrics.startTransfer();
+        RuntimeException failure = null;
+        try {
+            return executeTransfer(actor, idempotencyKey, request);
+        } catch (RuntimeException caught) {
+            failure = caught;
+            throw caught;
+        } finally {
+            metrics.completeTransfer(sample, failure);
+        }
+    }
+
+    private TransferResponse executeTransfer(BankingPrincipal actor, String idempotencyKey, TransferRequest request) {
         if (idempotencyKey == null || !idempotencyKey.matches(KEY_PATTERN)) {
             throw new BusinessException("INVALID_IDEMPOTENCY_KEY",
                     "Idempotency-Key must contain 8 to 128 letters, digits, dot, underscore, colon, or hyphen",

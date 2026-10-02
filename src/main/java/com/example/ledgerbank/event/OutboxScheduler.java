@@ -27,4 +27,9 @@ class OutboxScheduler {
             log.info("Removed {} expired published outbox events", deleted);
         }
     }
+
+    @Scheduled(fixedDelayString = "${ledgerbank.outbox.metrics-refresh-interval}")
+    void refreshBacklogMetrics() {
+        delivery.refreshBacklogMetrics();
+    }
 }

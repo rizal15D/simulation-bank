@@ -13,12 +13,14 @@ import static org.mockito.Mockito.when;
 import com.example.ledgerbank.auth.BankingPrincipal;
 import com.example.ledgerbank.auth.UserRole;
 import com.example.ledgerbank.common.exception.BusinessException;
+import com.example.ledgerbank.common.observability.BankingMetrics;
 import com.example.ledgerbank.event.BankingEvent;
 import com.example.ledgerbank.event.BankingEventPublisher;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,6 +51,7 @@ class IdempotentTransferServiceTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         service = new IdempotentTransferService(redis, records, transfers, core, transaction, events,
+                new BankingMetrics(new SimpleMeterRegistry()),
                 Duration.ofHours(24), Duration.ofSeconds(30));
         lenient().when(transaction.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);

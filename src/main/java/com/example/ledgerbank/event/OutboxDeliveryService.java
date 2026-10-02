@@ -1,5 +1,6 @@
 package com.example.ledgerbank.event;
 
+import com.example.ledgerbank.common.observability.BankingMetrics;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -17,19 +18,21 @@ public class OutboxDeliveryService {
     private final OutboxEventRepository outbox;
     private final OutboxMessagePublisher publisher;
     private final OutboxProperties properties;
+    private final BankingMetrics metrics;
     private final Clock clock;
 
     @Autowired
     public OutboxDeliveryService(OutboxEventRepository outbox, OutboxMessagePublisher publisher,
-                                 OutboxProperties properties) {
-        this(outbox, publisher, properties, Clock.systemUTC());
+                                 OutboxProperties properties, BankingMetrics metrics) {
+        this(outbox, publisher, properties, metrics, Clock.systemUTC());
     }
 
     OutboxDeliveryService(OutboxEventRepository outbox, OutboxMessagePublisher publisher,
-                          OutboxProperties properties, Clock clock) {
+                          OutboxProperties properties, BankingMetrics metrics, Clock clock) {
         this.outbox = outbox;
         this.publisher = publisher;
         this.properties = properties;
+        this.metrics = metrics;
         this.clock = clock;
     }
 
@@ -46,15 +49,24 @@ public class OutboxDeliveryService {
         return outbox.deletePublishedBefore(clock.instant().minus(properties.retention()));
     }
 
+    @Transactional(readOnly = true)
+    public void refreshBacklogMetrics() {
+        metrics.refreshOutboxBacklog(
+                outbox.countByStatus(OutboxStatus.PENDING), outbox.countByStatus(OutboxStatus.DEAD));
+    }
+
     private void publish(OutboxEvent event, Instant now) {
         try {
             publisher.publish(event);
-            event.markPublished(clock.instant());
+            Instant publishedAt = clock.instant();
+            event.markPublished(publishedAt);
+            metrics.outboxPublished(Duration.between(event.getCreatedAt(), publishedAt));
             log.debug("Published outbox event {} ({})", event.getId(), event.getEventType());
         } catch (RuntimeException failure) {
             int nextAttempt = event.getAttemptCount() + 1;
             boolean exhausted = nextAttempt >= properties.maxAttempts();
             event.recordFailure(now.plus(backoff(event.getAttemptCount())), failure.getMessage(), exhausted);
+            metrics.outboxFailure(exhausted);
             if (exhausted) {
                 log.error("Outbox event {} ({}) moved to DEAD after {} attempts",
                         event.getId(), event.getEventType(), nextAttempt, failure);

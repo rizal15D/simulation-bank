@@ -65,6 +65,7 @@ ledgerbank:
     confirm-timeout: ${OUTBOX_CONFIRM_TIMEOUT:PT5S}
     retention: ${OUTBOX_RETENTION:P7D}
     cleanup-interval: ${OUTBOX_CLEANUP_INTERVAL:PT1H}
+    metrics-refresh-interval: ${OUTBOX_METRICS_REFRESH_INTERVAL:PT5S}
   bootstrap-admin:
     email: ${APP_ADMIN_EMAIL:}
     password: ${APP_ADMIN_PASSWORD:}

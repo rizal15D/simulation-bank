@@ -133,8 +133,12 @@ class BankingApiIT extends AbstractIntegrationTest {
 
     @Test
     void actuatorAccessIsRoleAwareAndDoesNotExposeSecrets() throws Exception {
-        customer("Metrics Customer", "metrics-customer@example.com");
+        String customerId = customer("Metrics Customer", "metrics-customer@example.com");
         String customerToken = currentToken;
+        String source = openAccount(customerId).get("id").toString();
+        String destination = openAccount(customerId).get("id").toString();
+        assertEquals(201, amount(source, "deposit", "100").status());
+        assertEquals(201, transfer(source, destination, "25").status());
         String adminPassword = "observability-secret-do-not-expose";
         users.saveAndFlush(AppUser.admin("metrics-admin@example.com", passwords.encode(adminPassword)));
         ApiResponse adminLogin = postPublic("/api/v1/auth/login", Map.of(
@@ -154,12 +158,14 @@ class BankingApiIT extends AbstractIntegrationTest {
         assertEquals(403, send("GET", "/actuator/metrics", null, customerToken, Map.of()).statusCode());
         HttpResponse<String> adminMetrics = send("GET", "/actuator/metrics", null, adminToken, Map.of());
         assertEquals(200, adminMetrics.statusCode());
-        assertTrue(adminMetrics.body().contains("names"));
+        assertTrue(adminMetrics.body().contains("ledgerbank.transfer.requests"));
+        assertTrue(adminMetrics.body().contains("ledgerbank.outbox.backlog"));
 
         HttpResponse<String> prometheus = send("GET", "/actuator/prometheus", null, adminToken,
                 Map.of("Accept", "text/plain"));
         assertEquals(200, prometheus.statusCode());
-        assertTrue(prometheus.body().contains("jvm_"));
+        assertTrue(prometheus.body().contains("ledgerbank_transfer_requests_total"));
+        assertTrue(prometheus.body().contains("ledgerbank_outbox_backlog"));
         assertEquals(403, send("GET", "/actuator/env", null, adminToken, Map.of()).statusCode());
 
         HttpResponse<String> info = send("GET", "/actuator/info", null, null, Map.of());

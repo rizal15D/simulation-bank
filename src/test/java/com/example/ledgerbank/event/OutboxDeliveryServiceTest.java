@@ -6,6 +6,8 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.example.ledgerbank.common.observability.BankingMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -21,8 +23,9 @@ class OutboxDeliveryServiceTest {
     private final Instant now = Instant.parse("2026-10-02T00:00:00Z");
     private final OutboxProperties properties = new OutboxProperties(10, 2, Duration.ofSeconds(2),
             Duration.ofSeconds(5), Duration.ofSeconds(3), Duration.ofDays(7));
+    private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
     private final OutboxDeliveryService delivery = new OutboxDeliveryService(
-            outbox, publisher, properties, Clock.fixed(now, ZoneOffset.UTC));
+            outbox, publisher, properties, new BankingMetrics(registry), Clock.fixed(now, ZoneOffset.UTC));
 
     @Test
     void confirmedEventsAreMarkedPublished() {
