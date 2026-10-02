@@ -7,3 +7,4 @@
 *.xml text eol=lf
 mvnw text eol=lf
 mvnw.cmd text eol=crlf
+scripts/*.sh text eol=lf
