@@ -1,5 +1,7 @@
 package com.example.ledgerbank.integration;
 
+import com.example.ledgerbank.auth.AppUser;
+import com.example.ledgerbank.auth.AppUserRepository;
 import com.example.ledgerbank.common.config.RabbitMqConfig;
 import com.example.ledgerbank.event.BankingEvent;
 import com.example.ledgerbank.event.BankingEventType;
@@ -14,6 +16,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.DeserializationFeature;
 
@@ -50,6 +53,8 @@ class BankingApiIT extends AbstractIntegrationTest {
     @Autowired private ObjectMapper json;
     @Autowired private StringRedisTemplate redis;
     @Autowired private RabbitTemplate rabbit;
+    @Autowired private AppUserRepository users;
+    @Autowired private PasswordEncoder passwords;
 
     private final Map<String, String> customerTokens = new ConcurrentHashMap<>();
     private final Map<String, String> accountTokens = new ConcurrentHashMap<>();
@@ -109,6 +114,45 @@ class BankingApiIT extends AbstractIntegrationTest {
         assertEquals(200, accounts.statusCode());
         List<?> accountList = json.readValue(accounts.body(), List.class);
         assertEquals(2, accountList.size());
+    }
+
+    @Test
+    void actuatorAccessIsRoleAwareAndDoesNotExposeSecrets() throws Exception {
+        customer("Metrics Customer", "metrics-customer@example.com");
+        String customerToken = currentToken;
+        String adminPassword = "observability-secret-do-not-expose";
+        users.saveAndFlush(AppUser.admin("metrics-admin@example.com", passwords.encode(adminPassword)));
+        ApiResponse adminLogin = postPublic("/api/v1/auth/login", Map.of(
+                "email", "metrics-admin@example.com", "password", adminPassword));
+        assertEquals(200, adminLogin.status(), adminLogin.body().toString());
+        String adminToken = adminLogin.body().get("accessToken").toString();
+
+        HttpResponse<String> anonymousHealth = send("GET", "/actuator/health", null, null, Map.of());
+        assertEquals(200, anonymousHealth.statusCode());
+        assertFalse(anonymousHealth.body().contains("components"));
+
+        HttpResponse<String> adminHealth = send("GET", "/actuator/health", null, adminToken, Map.of());
+        assertEquals(200, adminHealth.statusCode());
+        assertTrue(adminHealth.body().contains("components"));
+
+        assertEquals(401, send("GET", "/actuator/metrics", null, null, Map.of()).statusCode());
+        assertEquals(403, send("GET", "/actuator/metrics", null, customerToken, Map.of()).statusCode());
+        HttpResponse<String> adminMetrics = send("GET", "/actuator/metrics", null, adminToken, Map.of());
+        assertEquals(200, adminMetrics.statusCode());
+        assertTrue(adminMetrics.body().contains("names"));
+
+        HttpResponse<String> prometheus = send("GET", "/actuator/prometheus", null, adminToken,
+                Map.of("Accept", "text/plain"));
+        assertEquals(200, prometheus.statusCode());
+        assertTrue(prometheus.body().contains("jvm_"));
+        assertEquals(403, send("GET", "/actuator/env", null, adminToken, Map.of()).statusCode());
+
+        HttpResponse<String> info = send("GET", "/actuator/info", null, null, Map.of());
+        assertEquals(200, info.statusCode());
+        String observableBodies = anonymousHealth.body() + adminHealth.body() + adminMetrics.body()
+                + prometheus.body() + info.body();
+        assertFalse(observableBodies.contains(adminPassword));
+        assertFalse(observableBodies.contains(adminToken));
     }
 
     @Test
@@ -842,11 +886,15 @@ class BankingApiIT extends AbstractIntegrationTest {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:"
                         + environment.getRequiredProperty("local.server.port") + path))
                 .timeout(Duration.ofSeconds(20))
-                .header("Accept", "application/json");
+                .header("Accept", headers.getOrDefault("Accept", "application/json"));
         if (token != null) {
             request.header("Authorization", "Bearer " + token);
         }
-        headers.forEach(request::header);
+        headers.forEach((name, value) -> {
+            if (!name.equalsIgnoreCase("Accept")) {
+                request.header(name, value);
+            }
+        });
         if (body == null) {
             request.method(method, HttpRequest.BodyPublishers.noBody());
         } else {
