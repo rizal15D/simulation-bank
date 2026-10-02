@@ -23,6 +23,18 @@ server:
   error:
     include-message: never
     include-stacktrace: never
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+      roles: ADMIN
+  info:
+    env:
+      enabled: false
 springdoc:
   default-produces-media-type: application/json
   api-docs:
