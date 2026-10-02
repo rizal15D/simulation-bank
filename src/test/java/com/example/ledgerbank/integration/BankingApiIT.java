@@ -154,6 +154,19 @@ class BankingApiIT extends AbstractIntegrationTest {
         assertEquals(200, adminHealth.statusCode());
         assertTrue(adminHealth.body().contains("components"));
 
+        HttpResponse<String> liveness = send("GET", "/actuator/health/liveness", null, adminToken, Map.of());
+        assertEquals(200, liveness.statusCode());
+        Map<?, ?> livenessComponents = (Map<?, ?>) json.readValue(liveness.body(), Map.class).get("components");
+        assertTrue(livenessComponents.containsKey("livenessState"));
+        assertFalse(livenessComponents.containsKey("db"));
+        HttpResponse<String> readiness = send("GET", "/actuator/health/readiness", null, adminToken, Map.of());
+        assertEquals(200, readiness.statusCode());
+        Map<?, ?> readinessComponents = (Map<?, ?>) json.readValue(readiness.body(), Map.class).get("components");
+        assertTrue(readinessComponents.containsKey("readinessState"));
+        assertTrue(readinessComponents.containsKey("db"));
+        assertTrue(readinessComponents.containsKey("redis"));
+        assertFalse(readinessComponents.containsKey("rabbit"));
+
         assertEquals(401, send("GET", "/actuator/metrics", null, null, Map.of()).statusCode());
         assertEquals(403, send("GET", "/actuator/metrics", null, customerToken, Map.of()).statusCode());
         HttpResponse<String> adminMetrics = send("GET", "/actuator/metrics", null, adminToken, Map.of());
@@ -170,7 +183,8 @@ class BankingApiIT extends AbstractIntegrationTest {
 
         HttpResponse<String> info = send("GET", "/actuator/info", null, null, Map.of());
         assertEquals(200, info.statusCode());
-        String observableBodies = anonymousHealth.body() + adminHealth.body() + adminMetrics.body()
+        String observableBodies = anonymousHealth.body() + adminHealth.body() + liveness.body() + readiness.body()
+                + adminMetrics.body()
                 + prometheus.body() + info.body();
         assertFalse(observableBodies.contains(adminPassword));
         assertFalse(observableBodies.contains(adminToken));

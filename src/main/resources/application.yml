@@ -35,6 +35,17 @@ management:
     health:
       show-details: when-authorized
       roles: ADMIN
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+          show-details: when-authorized
+          roles: ADMIN
+        readiness:
+          include: readinessState,db,redis
+          show-details: when-authorized
+          roles: ADMIN
   info:
     env:
       enabled: false
