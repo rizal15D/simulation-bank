@@ -1,9 +1,13 @@
 package com.example.ledgerbank.integration;
 
+import com.example.ledgerbank.common.config.RabbitMqConfig;
+import com.example.ledgerbank.event.BankingEvent;
+import com.example.ledgerbank.event.BankingEventType;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.env.Environment;
@@ -19,6 +23,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +33,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -43,6 +49,7 @@ class BankingApiIT extends AbstractIntegrationTest {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ObjectMapper json;
     @Autowired private StringRedisTemplate redis;
+    @Autowired private RabbitTemplate rabbit;
 
     private final Map<String, String> customerTokens = new ConcurrentHashMap<>();
     private final Map<String, String> accountTokens = new ConcurrentHashMap<>();
@@ -349,6 +356,53 @@ class BankingApiIT extends AbstractIntegrationTest {
         assertEquals(3L, count("account_transactions"));
         assertEquals(1L, count("transfers"));
         assertEquals(1L, jdbc.queryForObject("SELECT count(*) FROM transfer_idempotency", Long.class));
+    }
+
+    @Test
+    void committedTransferEventuallyCreatesIdempotentNotificationAndAuditRecords() throws Exception {
+        String source = newAccount();
+        String destination = newAccount();
+        assertEquals(201, amount(source, "deposit", "100").status());
+
+        ApiResponse completed = transfer(source, destination, "25");
+        assertEquals(201, completed.status());
+        UUID transferId = UUID.fromString(completed.body().get("id").toString());
+        UUID sourceCustomerId = jdbc.queryForObject("SELECT customer_id FROM accounts WHERE id = ?",
+                UUID.class, UUID.fromString(source));
+        UUID destinationCustomerId = jdbc.queryForObject("SELECT customer_id FROM accounts WHERE id = ?",
+                UUID.class, UUID.fromString(destination));
+
+        await().atMost(Duration.ofSeconds(10)).pollInterval(Duration.ofMillis(100)).untilAsserted(() -> {
+            assertEquals(1L, jdbc.queryForObject("""
+                    SELECT count(*) FROM audit_logs
+                    WHERE action = 'TRANSFER_COMPLETED' AND resource_id = ?
+                    """, Long.class, transferId));
+            assertEquals(2L, jdbc.queryForObject("""
+                    SELECT count(*) FROM notifications n
+                    JOIN audit_logs a ON a.event_id = n.event_id
+                    WHERE a.action = 'TRANSFER_COMPLETED' AND a.resource_id = ?
+                    """, Long.class, transferId));
+        });
+
+        UUID eventId = jdbc.queryForObject("""
+                SELECT event_id FROM audit_logs
+                WHERE action = 'TRANSFER_COMPLETED' AND resource_id = ?
+                """, UUID.class, transferId);
+        UUID actorId = jdbc.queryForObject("SELECT id FROM app_users WHERE customer_id = ?",
+                UUID.class, sourceCustomerId);
+        BankingEvent redelivery = new BankingEvent(eventId, BankingEventType.TRANSFER_COMPLETED,
+                actorId, sourceCustomerId, destinationCustomerId, "TRANSFER", transferId,
+                Map.of("sourceAccountId", source, "destinationAccountId", destination, "amount", "25"),
+                Instant.now());
+        rabbit.convertAndSend(RabbitMqConfig.BANKING_EXCHANGE,
+                BankingEventType.TRANSFER_COMPLETED.routingKey(), redelivery);
+
+        await().during(Duration.ofSeconds(2)).atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            assertEquals(1L, jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE event_id = ?",
+                    Long.class, eventId));
+            assertEquals(2L, jdbc.queryForObject("SELECT count(*) FROM notifications WHERE event_id = ?",
+                    Long.class, eventId));
+        });
     }
 
     @Test
