@@ -19,7 +19,7 @@ class ConfirmedRabbitEventPublisherTest {
     private final RabbitOperations operations = Mockito.mock(RabbitOperations.class);
     private final ObjectMapper json = Mockito.mock(ObjectMapper.class);
     private final OutboxProperties properties = new OutboxProperties(50, 8, Duration.ofSeconds(1),
-            Duration.ofMinutes(1), Duration.ofSeconds(2), Duration.ofDays(7));
+            Duration.ofMinutes(1), Duration.ofSeconds(2), Duration.ofSeconds(30), Duration.ofDays(7));
     private final ConfirmedRabbitEventPublisher publisher =
             new ConfirmedRabbitEventPublisher(rabbit, json, properties);
 

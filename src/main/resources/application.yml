@@ -74,6 +74,7 @@ ledgerbank:
     initial-backoff: ${OUTBOX_INITIAL_BACKOFF:PT1S}
     max-backoff: ${OUTBOX_MAX_BACKOFF:PT1M}
     confirm-timeout: ${OUTBOX_CONFIRM_TIMEOUT:PT5S}
+    claim-lease: ${OUTBOX_CLAIM_LEASE:PT30S}
     retention: ${OUTBOX_RETENTION:P7D}
     cleanup-interval: ${OUTBOX_CLEANUP_INTERVAL:PT1H}
     metrics-refresh-interval: ${OUTBOX_METRICS_REFRESH_INTERVAL:PT5S}

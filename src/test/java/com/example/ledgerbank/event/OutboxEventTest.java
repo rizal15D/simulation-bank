@@ -22,6 +22,12 @@ class OutboxEventTest {
         assertEquals(createdAt, outbox.getNextAttemptAt());
         assertNull(outbox.getPublishedAt());
 
+        Instant claimDeadline = createdAt.plusSeconds(30);
+        outbox.claimUntil(claimDeadline);
+        assertEquals(claimDeadline, outbox.getNextAttemptAt());
+        assertEquals(true, outbox.isClaimedUntil(claimDeadline));
+        assertEquals(0, outbox.getAttemptCount());
+
         Instant retryAt = createdAt.plusSeconds(10);
         outbox.recordFailure(retryAt, "x".repeat(600), false);
         assertEquals(OutboxStatus.PENDING, outbox.getStatus());

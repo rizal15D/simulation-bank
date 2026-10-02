@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -22,15 +23,17 @@ class OutboxDeliveryServiceTest {
     private final OutboxMessagePublisher publisher = Mockito.mock(OutboxMessagePublisher.class);
     private final Instant now = Instant.parse("2026-10-02T00:00:00Z");
     private final OutboxProperties properties = new OutboxProperties(10, 2, Duration.ofSeconds(2),
-            Duration.ofSeconds(5), Duration.ofSeconds(3), Duration.ofDays(7));
+            Duration.ofSeconds(5), Duration.ofSeconds(3), Duration.ofSeconds(10), Duration.ofDays(7));
+    private final OutboxPersistenceService persistence = new OutboxPersistenceService(outbox, properties);
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
     private final OutboxDeliveryService delivery = new OutboxDeliveryService(
-            outbox, publisher, properties, new BankingMetrics(registry), Clock.fixed(now, ZoneOffset.UTC));
+            persistence, publisher, properties, new BankingMetrics(registry), Clock.fixed(now, ZoneOffset.UTC));
 
     @Test
     void confirmedEventsAreMarkedPublished() {
         OutboxEvent event = event();
         when(outbox.lockReadyBatch(now, 10)).thenReturn(List.of(event));
+        when(outbox.lockById(event.getId())).thenReturn(Optional.of(event));
 
         assertEquals(1, delivery.publishReadyBatch());
 
@@ -44,6 +47,7 @@ class OutboxDeliveryServiceTest {
     void failuresUseBoundedExponentialBackoffAndEventuallyBecomeDead() {
         OutboxEvent event = event();
         when(outbox.lockReadyBatch(now, 10)).thenReturn(List.of(event));
+        when(outbox.lockById(event.getId())).thenReturn(Optional.of(event));
         doThrow(new IllegalStateException("broker unavailable")).when(publisher).publish(event);
 
         delivery.publishReadyBatch();

@@ -67,6 +67,17 @@ public class OutboxEvent {
         this.lastError = null;
     }
 
+    public void claimUntil(Instant claimDeadline) {
+        if (status != OutboxStatus.PENDING) {
+            throw new IllegalStateException("Only pending outbox events can be claimed");
+        }
+        this.nextAttemptAt = Objects.requireNonNull(claimDeadline, "claimDeadline");
+    }
+
+    public boolean isClaimedUntil(Instant claimDeadline) {
+        return status == OutboxStatus.PENDING && nextAttemptAt.equals(claimDeadline);
+    }
+
     public void recordFailure(Instant retryAt, String error, boolean exhausted) {
         this.attemptCount++;
         this.status = exhausted ? OutboxStatus.DEAD : OutboxStatus.PENDING;

@@ -11,6 +11,7 @@ public record OutboxProperties(
         Duration initialBackoff,
         Duration maxBackoff,
         Duration confirmTimeout,
+        Duration claimLease,
         Duration retention) {
 
     public OutboxProperties {
@@ -23,9 +24,13 @@ public record OutboxProperties(
         initialBackoff = positive(initialBackoff, "initial-backoff");
         maxBackoff = positive(maxBackoff, "max-backoff");
         confirmTimeout = positive(confirmTimeout, "confirm-timeout");
+        claimLease = positive(claimLease, "claim-lease");
         retention = positive(retention, "retention");
         if (maxBackoff.compareTo(initialBackoff) < 0) {
             throw new IllegalArgumentException("ledgerbank.outbox.max-backoff must not be shorter than initial-backoff");
+        }
+        if (claimLease.compareTo(confirmTimeout) < 0) {
+            throw new IllegalArgumentException("ledgerbank.outbox.claim-lease must not be shorter than confirm-timeout");
         }
     }
 

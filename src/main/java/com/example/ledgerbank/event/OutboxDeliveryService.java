@@ -9,71 +9,91 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class OutboxDeliveryService {
     private static final Logger log = LoggerFactory.getLogger(OutboxDeliveryService.class);
 
-    private final OutboxEventRepository outbox;
+    private final OutboxPersistenceService persistence;
     private final OutboxMessagePublisher publisher;
     private final OutboxProperties properties;
     private final BankingMetrics metrics;
     private final Clock clock;
 
     @Autowired
-    public OutboxDeliveryService(OutboxEventRepository outbox, OutboxMessagePublisher publisher,
+    public OutboxDeliveryService(OutboxPersistenceService persistence, OutboxMessagePublisher publisher,
                                  OutboxProperties properties, BankingMetrics metrics) {
-        this(outbox, publisher, properties, metrics, Clock.systemUTC());
+        this(persistence, publisher, properties, metrics, Clock.systemUTC());
     }
 
-    OutboxDeliveryService(OutboxEventRepository outbox, OutboxMessagePublisher publisher,
+    OutboxDeliveryService(OutboxPersistenceService persistence, OutboxMessagePublisher publisher,
                           OutboxProperties properties, BankingMetrics metrics, Clock clock) {
-        this.outbox = outbox;
+        this.persistence = persistence;
         this.publisher = publisher;
         this.properties = properties;
         this.metrics = metrics;
         this.clock = clock;
     }
 
-    @Transactional
     public int publishReadyBatch() {
         Instant now = clock.instant();
-        List<OutboxEvent> ready = outbox.lockReadyBatch(now, properties.batchSize());
-        ready.forEach(event -> publish(event, now));
+        List<OutboxEvent> ready = persistence.claimReadyBatch(now);
+        ready.forEach(this::publish);
         return ready.size();
     }
 
-    @Transactional
     public int removeExpiredPublished() {
-        return outbox.deletePublishedBefore(clock.instant().minus(properties.retention()));
+        return persistence.removeExpiredPublished(clock.instant().minus(properties.retention()));
     }
 
-    @Transactional(readOnly = true)
     public void refreshBacklogMetrics() {
-        metrics.refreshOutboxBacklog(
-                outbox.countByStatus(OutboxStatus.PENDING), outbox.countByStatus(OutboxStatus.DEAD));
+        OutboxPersistenceService.Backlog backlog = persistence.backlog();
+        metrics.refreshOutboxBacklog(backlog.pending(), backlog.dead());
     }
 
-    private void publish(OutboxEvent event, Instant now) {
+    private void publish(OutboxEvent event) {
+        Instant claimDeadline = event.getNextAttemptAt();
         try {
             publisher.publish(event);
-            Instant publishedAt = clock.instant();
-            event.markPublished(publishedAt);
-            metrics.outboxPublished(Duration.between(event.getCreatedAt(), publishedAt));
-            log.debug("Published outbox event {} ({})", event.getId(), event.getEventType());
         } catch (RuntimeException failure) {
-            int nextAttempt = event.getAttemptCount() + 1;
-            boolean exhausted = nextAttempt >= properties.maxAttempts();
-            event.recordFailure(now.plus(backoff(event.getAttemptCount())), failure.getMessage(), exhausted);
+            recordFailure(event, claimDeadline, failure);
+            return;
+        }
+
+        Instant publishedAt = clock.instant();
+        try {
+            if (persistence.markPublished(event.getId(), claimDeadline, publishedAt)) {
+                metrics.outboxPublished(Duration.between(event.getCreatedAt(), publishedAt));
+                log.debug("Published outbox event {} ({})", event.getId(), event.getEventType());
+            } else {
+                log.warn("Ignored stale success acknowledgement for outbox event {}", event.getId());
+            }
+        } catch (RuntimeException persistenceFailure) {
+            log.error("Outbox event {} was published but its database acknowledgement failed; "
+                    + "it will be retried after the claim lease", event.getId(), persistenceFailure);
+        }
+    }
+
+    private void recordFailure(OutboxEvent event, Instant claimDeadline, RuntimeException failure) {
+        int nextAttempt = event.getAttemptCount() + 1;
+        boolean exhausted = nextAttempt >= properties.maxAttempts();
+        Instant retryAt = clock.instant().plus(backoff(event.getAttemptCount()));
+        try {
+            if (!persistence.recordFailure(event.getId(), claimDeadline, retryAt, failure.getMessage(), exhausted)) {
+                log.warn("Ignored stale failure acknowledgement for outbox event {}", event.getId());
+                return;
+            }
             metrics.outboxFailure(exhausted);
             if (exhausted) {
                 log.error("Outbox event {} ({}) moved to DEAD after {} attempts",
                         event.getId(), event.getEventType(), nextAttempt, failure);
             } else {
                 log.warn("Outbox event {} ({}) publish attempt {} failed; next attempt at {}",
-                        event.getId(), event.getEventType(), nextAttempt, event.getNextAttemptAt());
+                        event.getId(), event.getEventType(), nextAttempt, retryAt);
             }
+        } catch (RuntimeException persistenceFailure) {
+            log.error("Could not record publish failure for outbox event {}; "
+                    + "it will be retried after the claim lease", event.getId(), persistenceFailure);
         }
     }
 

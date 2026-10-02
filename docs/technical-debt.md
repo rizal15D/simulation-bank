@@ -6,7 +6,7 @@ Inventory ini mencatat debt yang ditemukan selama Milestone 3 melalui integratio
 
 | ID | Masalah | Prioritas | Status |
 |---|---|---|---|
-| TD-01 | Broker I/O dilakukan saat transaksi dan lock outbox PostgreSQL masih terbuka | Tinggi | Dipilih untuk Milestone 3 |
+| TD-01 | Broker I/O dilakukan saat transaksi dan lock outbox PostgreSQL masih terbuka | Tinggi | Selesai |
 | TD-02 | Service banking memiliki overload internal tanpa authenticated principal | Tinggi | Selesai |
 | TD-03 | Workflow idempotensi transfer mencampur validasi/fingerprint dan koordinasi infrastructure | Sedang | Selesai |
 | TD-04 | Offset pagination dan count query histori bertambah mahal pada halaman sangat dalam | Sedang | Ditunda; belum menjadi bottleneck terukur |
@@ -22,7 +22,7 @@ Inventory ini mencatat debt yang ditemukan selama Milestone 3 melalui integratio
 
 **Rencana perbaikan.** Claim event ready dalam transaksi pendek dengan lease pada `next_attempt_at`, commit, publish di luar transaksi, lalu tandai sukses/gagal dalam transaksi pendek per event. Crash setelah publish tetapi sebelum acknowledgement database tetap menghasilkan redelivery yang aman karena consumer idempotent.
 
-**Status.** Dipilih untuk Milestone 3. Test harus membuktikan claim, publish, retry/backoff, dan recovery lease tanpa mengubah kontrak event.
+**Status.** Selesai pada Milestone 3. `OutboxPersistenceService` meng-claim batch dalam transaksi pendek, sedangkan publisher RabbitMQ berjalan setelah transaksi tersebut commit. Success/failure acknowledgement memakai transaksi singkat dan token lease sehingga acknowledgement stale tidak dapat menimpa claim baru. Lease dinormalisasi ke presisi mikrodetik PostgreSQL dan event kembali eligible setelah 30 detik jika proses berhenti. Sebanyak 95 unit/MVC test dan 24 integration test lulus, termasuk outage/recovery RabbitMQ.
 
 ## TD-02 — Jalur service tanpa principal
 
