@@ -23,6 +23,9 @@ server:
   error:
     include-message: never
     include-stacktrace: never
+logging:
+  pattern:
+    console: "timestamp=%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} level=%-5p service=${spring.application.name} correlation_id=%X{correlationId:-none} logger=%logger{36} message=%msg%n%wEx"
 management:
   endpoints:
     web:

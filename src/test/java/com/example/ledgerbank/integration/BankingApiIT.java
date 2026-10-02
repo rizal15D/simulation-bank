@@ -117,6 +117,21 @@ class BankingApiIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void requestCorrelationIdIsReturnedAndUnsafeValuesAreReplaced() throws Exception {
+        HttpResponse<String> correlated = send("GET", "/api/v1/health", null, null,
+                Map.of("X-Correlation-ID", "integration-request_123"));
+        assertEquals(200, correlated.statusCode());
+        assertEquals("integration-request_123", correlated.headers()
+                .firstValue("X-Correlation-ID").orElseThrow());
+
+        HttpResponse<String> sanitized = send("GET", "/api/v1/health", null, null,
+                Map.of("X-Correlation-ID", "unsafe value"));
+        assertEquals(200, sanitized.statusCode());
+        assertTrue(sanitized.headers().firstValue("X-Correlation-ID").orElseThrow()
+                .matches("[0-9a-f-]{36}"));
+    }
+
+    @Test
     void actuatorAccessIsRoleAwareAndDoesNotExposeSecrets() throws Exception {
         customer("Metrics Customer", "metrics-customer@example.com");
         String customerToken = currentToken;
