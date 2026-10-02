@@ -32,15 +32,6 @@ public class TransactionHistoryService {
         return query(accountId, page, size);
     }
 
-    @Transactional(readOnly = true)
-    TransactionHistoryResponse history(UUID accountId, int page, int size) {
-        validatePagination(page, size);
-        if (!accounts.existsById(accountId)) {
-            throw new BusinessException("ACCOUNT_NOT_FOUND", "Account was not found", HttpStatus.NOT_FOUND);
-        }
-        return query(accountId, page, size);
-    }
-
     private void validatePagination(int page, int size) {
         if (page < 0 || size < 1 || size > 100) {
             throw new BusinessException("INVALID_PAGINATION", "Page must be non-negative and size must be between 1 and 100",

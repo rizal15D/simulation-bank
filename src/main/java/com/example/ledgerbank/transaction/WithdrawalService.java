@@ -25,21 +25,10 @@ public class WithdrawalService {
 
     @Transactional
     public TransactionResponse withdraw(BankingPrincipal actor, UUID accountId, BigDecimal requestedAmount) {
-        return withdrawInternal(actor, accountId, requestedAmount);
-    }
-
-    @Transactional
-    TransactionResponse withdraw(UUID accountId, BigDecimal requestedAmount) {
-        return withdrawInternal(null, accountId, requestedAmount);
-    }
-
-    private TransactionResponse withdrawInternal(BankingPrincipal actor, UUID accountId, BigDecimal requestedAmount) {
         BigDecimal amount = Money.requireValid(requestedAmount);
         Account account = accounts.findByIdForUpdate(accountId)
                 .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account was not found", HttpStatus.NOT_FOUND));
-        if (actor != null) {
-            OwnershipPolicy.requireOwnedCustomer(actor, account.getCustomerId());
-        }
+        OwnershipPolicy.requireOwnedCustomer(actor, account.getCustomerId());
         account.requireActive();
         BigDecimal before = account.getBalance();
         account.debit(amount);

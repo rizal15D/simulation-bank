@@ -3,6 +3,8 @@ package com.example.ledgerbank.transfer;
 import com.example.ledgerbank.account.Account;
 import com.example.ledgerbank.account.AccountRepository;
 import com.example.ledgerbank.account.AccountStatus;
+import com.example.ledgerbank.auth.BankingPrincipal;
+import com.example.ledgerbank.auth.UserRole;
 import com.example.ledgerbank.common.exception.BusinessException;
 import com.example.ledgerbank.event.BankingEvent;
 import com.example.ledgerbank.event.BankingEventPublisher;
@@ -40,15 +42,19 @@ class TransferServiceTest {
     private final TransferService service = new TransferService(accounts, transfers, transactions, events);
     private final UUID sourceId = UUID.fromString("00000000-0000-0000-0000-000000000002");
     private final UUID destinationId = UUID.fromString("00000000-0000-0000-0000-000000000001");
-    private final Account source = account(sourceId, "100.00");
-    private final Account destination = account(destinationId, "20.00");
+    private final UUID sourceCustomerId = UUID.randomUUID();
+    private final UUID destinationCustomerId = UUID.randomUUID();
+    private final BankingPrincipal actor = principal(sourceCustomerId);
+    private final BankingPrincipal destinationActor = principal(destinationCustomerId);
+    private final Account source = account(sourceId, sourceCustomerId, "100.00");
+    private final Account destination = account(destinationId, destinationCustomerId, "20.00");
 
     @Test
     void transfersExactAmountAndRecordsBothSidesWithSharedTransferId() {
         availableAccounts();
         when(transfers.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        TransferResponse result = service.transfer(sourceId, destinationId, new BigDecimal("25.50"), "Lunch");
+        TransferResponse result = service.transfer(actor, sourceId, destinationId, new BigDecimal("25.50"), "Lunch");
 
         assertThat(source.getBalance()).isEqualByComparingTo("74.50");
         assertThat(destination.getBalance()).isEqualByComparingTo("45.50");
@@ -83,7 +89,7 @@ class TransferServiceTest {
     void oppositeTransferUsesSameAccountLockOrder() {
         availableAccounts();
         when(transfers.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        service.transfer(destinationId, sourceId, BigDecimal.ONE, null);
+        service.transfer(destinationActor, destinationId, sourceId, BigDecimal.ONE, null);
         InOrder locks = inOrder(accounts);
         locks.verify(accounts).findByIdForUpdate(destinationId);
         locks.verify(accounts).findByIdForUpdate(sourceId);
@@ -96,14 +102,14 @@ class TransferServiceTest {
     @ValueSource(strings = {"0", "-10", "0.001", "100000000000000000"})
     void rejectsInvalidAmount(String amount) {
         BigDecimal value = amount == null ? null : new BigDecimal(amount);
-        assertThatThrownBy(() -> service.transfer(sourceId, destinationId, value, null))
+        assertThatThrownBy(() -> service.transfer(actor, sourceId, destinationId, value, null))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("INVALID_AMOUNT");
         verifyNoInteractions(accounts, transfers, transactions);
     }
 
     @Test
     void rejectsSelfTransfer() {
-        assertThatThrownBy(() -> service.transfer(sourceId, sourceId, BigDecimal.ONE, null))
+        assertThatThrownBy(() -> service.transfer(actor, sourceId, sourceId, BigDecimal.ONE, null))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("SAME_ACCOUNT");
         verifyNoInteractions(accounts, transfers, transactions);
     }
@@ -112,7 +118,7 @@ class TransferServiceTest {
     void rejectsMissingSourceAccount() {
         when(accounts.findByIdForUpdate(destinationId)).thenReturn(Optional.of(destination));
         when(accounts.findByIdForUpdate(sourceId)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.transfer(sourceId, destinationId, BigDecimal.ONE, null))
+        assertThatThrownBy(() -> service.transfer(actor, sourceId, destinationId, BigDecimal.ONE, null))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("ACCOUNT_NOT_FOUND");
         verifyNoInteractions(transfers, transactions);
     }
@@ -120,7 +126,7 @@ class TransferServiceTest {
     @Test
     void rejectsMissingDestinationAccount() {
         when(accounts.findByIdForUpdate(destinationId)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.transfer(sourceId, destinationId, BigDecimal.ONE, null))
+        assertThatThrownBy(() -> service.transfer(actor, sourceId, destinationId, BigDecimal.ONE, null))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("ACCOUNT_NOT_FOUND");
         verifyNoInteractions(transfers, transactions);
     }
@@ -128,7 +134,7 @@ class TransferServiceTest {
     @Test
     void rejectsInsufficientBalanceAndKeepsBothBalances() {
         availableAccounts();
-        assertThatThrownBy(() -> service.transfer(sourceId, destinationId, new BigDecimal("100.01"), null))
+        assertThatThrownBy(() -> service.transfer(actor, sourceId, destinationId, new BigDecimal("100.01"), null))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("INSUFFICIENT_BALANCE");
         assertUnchanged();
     }
@@ -138,7 +144,7 @@ class TransferServiceTest {
     void rejectsEitherInactiveAccount(boolean sourceInactive) {
         availableAccounts();
         ReflectionTestUtils.setField(sourceInactive ? source : destination, "status", AccountStatus.BLOCKED);
-        assertThatThrownBy(() -> service.transfer(sourceId, destinationId, BigDecimal.ONE, null))
+        assertThatThrownBy(() -> service.transfer(actor, sourceId, destinationId, BigDecimal.ONE, null))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("ACCOUNT_NOT_ACTIVE");
         assertUnchanged();
     }
@@ -147,7 +153,7 @@ class TransferServiceTest {
     void rejectsCurrencyMismatch() {
         availableAccounts();
         ReflectionTestUtils.setField(destination, "currency", "USD");
-        assertThatThrownBy(() -> service.transfer(sourceId, destinationId, BigDecimal.ONE, null))
+        assertThatThrownBy(() -> service.transfer(actor, sourceId, destinationId, BigDecimal.ONE, null))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CURRENCY_MISMATCH");
         assertUnchanged();
     }
@@ -156,7 +162,7 @@ class TransferServiceTest {
     void checksDestinationCapacityBeforeDebitingSource() {
         availableAccounts();
         ReflectionTestUtils.setField(destination, "balance", new BigDecimal("99999999999999999.99"));
-        assertThatThrownBy(() -> service.transfer(sourceId, destinationId, new BigDecimal("0.01"), null))
+        assertThatThrownBy(() -> service.transfer(actor, sourceId, destinationId, new BigDecimal("0.01"), null))
                 .isInstanceOf(BusinessException.class);
         assertThat(source.getBalance()).isEqualByComparingTo("100.00");
         assertThat(destination.getBalance()).isEqualByComparingTo("99999999999999999.99");
@@ -168,7 +174,7 @@ class TransferServiceTest {
         availableAccounts();
         when(transfers.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(transactions.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("History write failed"));
-        assertThatThrownBy(() -> service.transfer(sourceId, destinationId, BigDecimal.ONE, null))
+        assertThatThrownBy(() -> service.transfer(actor, sourceId, destinationId, BigDecimal.ONE, null))
                 .isInstanceOf(DataIntegrityViolationException.class).hasMessage("History write failed");
         // Actual persisted rollback is verified separately against PostgreSQL; a unit test has no DB transaction.
     }
@@ -184,8 +190,12 @@ class TransferServiceTest {
         verifyNoInteractions(transfers, transactions);
     }
 
-    private static Account account(UUID id, String balance) {
-        Account account = new Account(UUID.randomUUID(), "LBK-" + id);
+    private static BankingPrincipal principal(UUID customerId) {
+        return new BankingPrincipal(UUID.randomUUID(), customerId, "owner@example.com", UserRole.CUSTOMER);
+    }
+
+    private static Account account(UUID id, UUID customerId, String balance) {
+        Account account = new Account(customerId, "LBK-" + id);
         ReflectionTestUtils.setField(account, "id", id);
         ReflectionTestUtils.setField(account, "balance", new BigDecimal(balance));
         return account;

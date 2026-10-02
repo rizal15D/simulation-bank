@@ -36,17 +36,6 @@ public class TransferService {
     @Transactional
     public TransferResponse transfer(BankingPrincipal actor, UUID sourceAccountId, UUID destinationAccountId,
                                      BigDecimal requestedAmount, String description) {
-        return transferInternal(actor, sourceAccountId, destinationAccountId, requestedAmount, description);
-    }
-
-    @Transactional
-    TransferResponse transfer(UUID sourceAccountId, UUID destinationAccountId,
-                              BigDecimal requestedAmount, String description) {
-        return transferInternal(null, sourceAccountId, destinationAccountId, requestedAmount, description);
-    }
-
-    private TransferResponse transferInternal(BankingPrincipal actor, UUID sourceAccountId, UUID destinationAccountId,
-                                              BigDecimal requestedAmount, String description) {
         BigDecimal amount = Money.requireValid(requestedAmount);
         if (sourceAccountId == null || destinationAccountId == null) {
             throw new BusinessException("ACCOUNT_NOT_FOUND", "Both account IDs are required", HttpStatus.NOT_FOUND);
@@ -64,9 +53,7 @@ public class TransferService {
         Account second = lockAccount(sourceFirst ? destinationAccountId : sourceAccountId);
         Account source = sourceFirst ? first : second;
         Account destination = sourceFirst ? second : first;
-        if (actor != null) {
-            OwnershipPolicy.requireOwnedCustomer(actor, source.getCustomerId());
-        }
+        OwnershipPolicy.requireOwnedCustomer(actor, source.getCustomerId());
         source.requireActive();
         destination.requireActive();
         if (!source.getCurrency().equals(destination.getCurrency())) {
@@ -83,7 +70,7 @@ public class TransferService {
                 amount, sourceBefore, source.getBalance()));
         transactions.saveAndFlush(new AccountTransaction(destination, transfer.getId(), TransactionType.TRANSFER_CREDIT,
                 amount, destinationBefore, destination.getBalance()));
-        events.publish(BankingEvent.transferCompleted(actor == null ? null : actor.userId(),
+        events.publish(BankingEvent.transferCompleted(actor.userId(),
                 source.getCustomerId(), destination.getCustomerId(), transfer.getId(), sourceAccountId,
                 destinationAccountId, amount));
         return TransferResponse.from(transfer);

@@ -7,7 +7,7 @@ Inventory ini mencatat debt yang ditemukan selama Milestone 3 melalui integratio
 | ID | Masalah | Prioritas | Status |
 |---|---|---|---|
 | TD-01 | Broker I/O dilakukan saat transaksi dan lock outbox PostgreSQL masih terbuka | Tinggi | Dipilih untuk Milestone 3 |
-| TD-02 | Service banking memiliki overload internal tanpa authenticated principal | Tinggi | Dipilih untuk Milestone 3 |
+| TD-02 | Service banking memiliki overload internal tanpa authenticated principal | Tinggi | Selesai |
 | TD-03 | Workflow idempotensi transfer mencampur validasi/fingerprint dan koordinasi infrastructure | Sedang | Dipilih untuk Milestone 3 |
 | TD-04 | Offset pagination dan count query histori bertambah mahal pada halaman sangat dalam | Sedang | Ditunda; belum menjadi bottleneck terukur |
 | TD-05 | Kontensi rekening bersama dapat memenuhi connection pool dan menambah parked HTTP threads | Sedang | Ditunda; perlu target kapasitas/SLO |
@@ -34,7 +34,7 @@ Inventory ini mencatat debt yang ditemukan selama Milestone 3 melalui integratio
 
 **Rencana perbaikan.** Hapus overload tanpa principal, wajibkan `BankingPrincipal` non-null pada seluruh entry point banking, dan perbarui unit test menggunakan principal yang sesuai. Pertahankan kontrak HTTP dan response yang ada.
 
-**Status.** Dipilih untuk Milestone 3. Unit dan integration test ownership wajib tetap lulus.
+**Status.** Selesai pada Milestone 3. Overload tanpa principal telah dihapus dari deposit, withdrawal, transfer, dan histori. Seluruh jalur memakai ownership policy yang sama dengan runtime; 40 unit test service terkait lulus setelah perubahan.
 
 ## TD-03 — Tanggung jawab berlebih pada workflow idempotensi transfer
 

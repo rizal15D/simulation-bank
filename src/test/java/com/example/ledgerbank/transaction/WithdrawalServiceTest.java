@@ -3,6 +3,8 @@ package com.example.ledgerbank.transaction;
 import com.example.ledgerbank.account.Account;
 import com.example.ledgerbank.account.AccountRepository;
 import com.example.ledgerbank.account.AccountStatus;
+import com.example.ledgerbank.auth.BankingPrincipal;
+import com.example.ledgerbank.auth.UserRole;
 import com.example.ledgerbank.common.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -26,6 +28,9 @@ class WithdrawalServiceTest {
     private final TransactionRepository transactions = mock(TransactionRepository.class);
     private final WithdrawalService service = new WithdrawalService(accounts, transactions);
     private final UUID accountId = UUID.randomUUID();
+    private final UUID customerId = UUID.randomUUID();
+    private final BankingPrincipal actor = new BankingPrincipal(
+            UUID.randomUUID(), customerId, "owner@example.com", UserRole.CUSTOMER);
 
     @Test
     void withdrawsEntireBalanceAndRecordsHistory() {
@@ -33,7 +38,7 @@ class WithdrawalServiceTest {
         when(accounts.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
         when(transactions.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        TransactionResponse result = service.withdraw(accountId, new BigDecimal("10.25"));
+        TransactionResponse result = service.withdraw(actor, accountId, new BigDecimal("10.25"));
 
         assertThat(account.getBalance()).isEqualByComparingTo("0.00");
         assertThat(result.accountId()).isEqualTo(accountId);
@@ -48,7 +53,7 @@ class WithdrawalServiceTest {
     @ValueSource(strings = {"0", "-1", "1.001"})
     void rejectsInvalidAmounts(String amount) {
         BigDecimal value = amount == null ? null : new BigDecimal(amount);
-        assertThatThrownBy(() -> service.withdraw(accountId, value))
+        assertThatThrownBy(() -> service.withdraw(actor, accountId, value))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("INVALID_AMOUNT");
         verifyNoInteractions(accounts, transactions);
     }
@@ -57,7 +62,7 @@ class WithdrawalServiceTest {
     void rejectsInsufficientBalanceWithoutChangingIt() {
         Account account = account("10.00");
         when(accounts.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
-        assertThatThrownBy(() -> service.withdraw(accountId, new BigDecimal("10.01")))
+        assertThatThrownBy(() -> service.withdraw(actor, accountId, new BigDecimal("10.01")))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("INSUFFICIENT_BALANCE");
         assertThat(account.getBalance()).isEqualByComparingTo("10.00");
         verifyNoInteractions(transactions);
@@ -66,7 +71,7 @@ class WithdrawalServiceTest {
     @Test
     void rejectsMissingAccount() {
         when(accounts.findByIdForUpdate(accountId)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.withdraw(accountId, BigDecimal.ONE))
+        assertThatThrownBy(() -> service.withdraw(actor, accountId, BigDecimal.ONE))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("ACCOUNT_NOT_FOUND");
         verifyNoInteractions(transactions);
     }
@@ -76,14 +81,14 @@ class WithdrawalServiceTest {
         Account account = account("10.00");
         ReflectionTestUtils.setField(account, "status", AccountStatus.CLOSED);
         when(accounts.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
-        assertThatThrownBy(() -> service.withdraw(accountId, BigDecimal.ONE))
+        assertThatThrownBy(() -> service.withdraw(actor, accountId, BigDecimal.ONE))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("ACCOUNT_NOT_ACTIVE");
         assertThat(account.getBalance()).isEqualByComparingTo("10.00");
         verifyNoInteractions(transactions);
     }
 
     private Account account(String balance) {
-        Account account = new Account(UUID.randomUUID(), "LBK-2026-00000001");
+        Account account = new Account(customerId, "LBK-2026-00000001");
         ReflectionTestUtils.setField(account, "id", accountId);
         ReflectionTestUtils.setField(account, "balance", new BigDecimal(balance));
         return account;
