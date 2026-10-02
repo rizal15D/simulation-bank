@@ -6,6 +6,7 @@ docs/*
 !docs/security.md
 !docs/events.md
 !docs/redis.md
+!docs/technical-debt.md
 !docs/performance/
 !docs/performance/**
 !docs/assets/
