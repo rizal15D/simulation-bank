@@ -68,3 +68,19 @@ dianalisis; gunakan hanya database development yang dapat dibuang.
 
 Mode `TRANSFER_ACCOUNT_MODE=shared` membuat seluruh VU memakai pasangan account yang sama. Gunakan
 hanya untuk observasi lock/Hikari dan jangan bandingkan throughput-nya dengan baseline `isolated`.
+
+## Query plan history
+
+Setelah membuat dataset sintetis, jalankan SQL di `performance/sql/transaction-history-explain.sql`
+dengan psql variables `account_id`, `page_size`, dan `deep_offset`. Contoh dari host yang memiliki
+`psql`:
+
+```bash
+psql "$DB_URL" -v account_id=00000000-0000-0000-0000-000000000000 \
+  -v page_size=20 -v deep_offset=900 \
+  -f performance/sql/transaction-history-explain.sql
+```
+
+Jalankan `ANALYZE account_transactions` lebih dahulu pada database development/test agar planner
+statistics mewakili dataset terbaru. Script hanya membaca data, tetapi output dapat memuat UUID
+account; jangan jalankan terhadap production atau mempublikasikan identifier data nyata.
