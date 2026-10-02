@@ -578,6 +578,45 @@ class BankingApiIT extends AbstractIntegrationTest {
                 """, Long.class, UUID.fromString(source)));
     }
 
+    @Test
+    void concurrentRequestsWithSameIdempotencyKeyCreateOneTransfer() throws Exception {
+        String source = newAccount();
+        String destination = newAccount();
+        assertEquals(201, amount(source, "deposit", "100").status());
+        String key = "concurrent-idempotency-" + UUID.randomUUID();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<ApiResponse> responses;
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> concurrentTransfer(source, destination, "30", key, ready, start));
+            var second = executor.submit(() -> concurrentTransfer(source, destination, "30", key, ready, start));
+            try {
+                assertTrue(ready.await(10, TimeUnit.SECONDS));
+            } finally {
+                start.countDown();
+            }
+            responses = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+        }
+
+        List<ApiResponse> successful = responses.stream()
+                .filter(response -> response.status() == 201).toList();
+        assertFalse(successful.isEmpty());
+        assertTrue(responses.stream().allMatch(response -> response.status() == 201
+                || response.status() == 409
+                && "IDEMPOTENCY_REQUEST_IN_PROGRESS".equals(response.body().get("code"))));
+        assertEquals(1, successful.stream().map(response -> response.body().get("id")).distinct().count());
+
+        ApiResponse retry = transfer(source, destination, "30", key);
+        assertEquals(201, retry.status());
+        assertEquals(successful.getFirst().body().get("id"), retry.body().get("id"));
+        assertBalance(source, "70");
+        assertBalance(destination, "30");
+        assertEquals(1L, count("transfers"));
+        assertEquals(3L, count("account_transactions"));
+        assertEquals(1L, jdbc.queryForObject("SELECT count(*) FROM transfer_idempotency", Long.class));
+    }
+
     private int concurrentWithdrawal(String accountId, CountDownLatch ready, CountDownLatch start) throws Exception {
         ready.countDown();
         assertTrue(start.await(10, TimeUnit.SECONDS));
