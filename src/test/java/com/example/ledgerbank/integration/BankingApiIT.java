@@ -617,6 +617,43 @@ class BankingApiIT extends AbstractIntegrationTest {
         assertEquals(1L, jdbc.queryForObject("SELECT count(*) FROM transfer_idempotency", Long.class));
     }
 
+    @Test
+    void oppositeDirectionTransfersUseDeterministicLockOrdering() throws Exception {
+        String firstAccount = newAccount();
+        String secondAccount = newAccount();
+        assertEquals(201, amount(firstAccount, "deposit", "100").status());
+        assertEquals(201, amount(secondAccount, "deposit", "100").status());
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> concurrentTransfer(firstAccount, secondAccount, "10",
+                    UUID.randomUUID().toString(), ready, start));
+            var second = executor.submit(() -> concurrentTransfer(secondAccount, firstAccount, "10",
+                    UUID.randomUUID().toString(), ready, start));
+            try {
+                assertTrue(ready.await(10, TimeUnit.SECONDS));
+            } finally {
+                start.countDown();
+            }
+            List<ApiResponse> responses = List.of(
+                    first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+            assertTrue(responses.stream().allMatch(response -> response.status() == 201),
+                    () -> "Both opposite transfers must commit: " + responses);
+        }
+
+        assertBalance(firstAccount, "100");
+        assertBalance(secondAccount, "100");
+        assertEquals(2L, count("transfers"));
+        assertEquals(6L, count("account_transactions"));
+        assertEquals(2L, jdbc.queryForObject("""
+                SELECT count(*) FROM account_transactions WHERE transaction_type = 'TRANSFER_DEBIT'
+                """, Long.class));
+        assertEquals(2L, jdbc.queryForObject("""
+                SELECT count(*) FROM account_transactions WHERE transaction_type = 'TRANSFER_CREDIT'
+                """, Long.class));
+    }
+
     private int concurrentWithdrawal(String accountId, CountDownLatch ready, CountDownLatch start) throws Exception {
         ready.countDown();
         assertTrue(start.await(10, TimeUnit.SECONDS));
