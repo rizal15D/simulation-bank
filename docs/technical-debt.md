@@ -8,7 +8,7 @@ Inventory ini mencatat debt yang ditemukan selama Milestone 3 melalui integratio
 |---|---|---|---|
 | TD-01 | Broker I/O dilakukan saat transaksi dan lock outbox PostgreSQL masih terbuka | Tinggi | Dipilih untuk Milestone 3 |
 | TD-02 | Service banking memiliki overload internal tanpa authenticated principal | Tinggi | Selesai |
-| TD-03 | Workflow idempotensi transfer mencampur validasi/fingerprint dan koordinasi infrastructure | Sedang | Dipilih untuk Milestone 3 |
+| TD-03 | Workflow idempotensi transfer mencampur validasi/fingerprint dan koordinasi infrastructure | Sedang | Selesai |
 | TD-04 | Offset pagination dan count query histori bertambah mahal pada halaman sangat dalam | Sedang | Ditunda; belum menjadi bottleneck terukur |
 | TD-05 | Kontensi rekening bersama dapat memenuhi connection pool dan menambah parked HTTP threads | Sedang | Ditunda; perlu target kapasitas/SLO |
 
@@ -46,7 +46,7 @@ Inventory ini mencatat debt yang ditemukan selama Milestone 3 melalui integratio
 
 **Rencana perbaikan.** Ekstrak validator/fingerprinter deterministik yang menghasilkan request tervalidasi beserta hash canonical. Uji null/empty description, normalisasi decimal, invalid key, dan perubahan payload secara terisolasi. Coordinator tetap fokus pada Redis, transaksi, durable replay, event, dan metrics.
 
-**Status.** Dipilih untuk Milestone 3. Kontrak `Idempotency-Key` dan response API tidak berubah.
+**Status.** Selesai pada Milestone 3. `TransferRequestValidator` kini memiliki validasi pra-infrastructure, normalisasi amount, canonical encoding, dan SHA-256 fingerprint. Coordinator berfokus pada Redis, transaksi, durable replay, event, dan metrics. Invariant kritis tetap diperiksa ulang pada transaction boundary sebagai defense in depth. Sembilan regression test mengunci protocol vector serta replay semantics tanpa mengubah kontrak API.
 
 ## TD-04 — Skalabilitas pagination histori
 

@@ -52,6 +52,7 @@ class IdempotentTransferServiceTest {
     void setUp() {
         service = new IdempotentTransferService(redis, records, transfers, core, transaction, events,
                 new BankingMetrics(new SimpleMeterRegistry()),
+                new TransferRequestValidator(),
                 Duration.ofHours(24), Duration.ofSeconds(30));
         lenient().when(transaction.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);

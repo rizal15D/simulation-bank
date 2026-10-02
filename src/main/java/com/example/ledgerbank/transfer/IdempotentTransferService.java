@@ -1,19 +1,14 @@
 package com.example.ledgerbank.transfer;
 
 import com.example.ledgerbank.auth.BankingPrincipal;
-import com.example.ledgerbank.common.Money;
 import com.example.ledgerbank.common.exception.BusinessException;
 import com.example.ledgerbank.common.observability.BankingMetrics;
 import com.example.ledgerbank.event.BankingEvent;
 import com.example.ledgerbank.event.BankingEventPublisher;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Base64;
-import java.util.HexFormat;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,8 +21,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class IdempotentTransferService {
     private static final Logger log = LoggerFactory.getLogger(IdempotentTransferService.class);
-    private static final String KEY_PATTERN = "[A-Za-z0-9._:-]{8,128}";
-
     private final RedisTransferIdempotencyStore redis;
     private final TransferIdempotencyRepository idempotencyRecords;
     private final TransferRepository transfers;
@@ -35,6 +28,7 @@ public class IdempotentTransferService {
     private final TransactionTemplate transaction;
     private final BankingEventPublisher events;
     private final BankingMetrics metrics;
+    private final TransferRequestValidator requestValidator;
     private final Duration resultTtl;
     private final Duration lockTtl;
 
@@ -42,7 +36,7 @@ public class IdempotentTransferService {
                                      TransferIdempotencyRepository idempotencyRecords,
                                      TransferRepository transfers, TransferService transferService,
                                      TransactionTemplate transaction, BankingEventPublisher events,
-                                     BankingMetrics metrics,
+                                     BankingMetrics metrics, TransferRequestValidator requestValidator,
                                      @Value("${ledgerbank.idempotency.transfer-ttl}") Duration resultTtl,
                                      @Value("${ledgerbank.idempotency.lock-ttl}") Duration lockTtl) {
         this.redis = redis;
@@ -52,6 +46,7 @@ public class IdempotentTransferService {
         this.transaction = transaction;
         this.events = events;
         this.metrics = metrics;
+        this.requestValidator = requestValidator;
         this.resultTtl = resultTtl;
         this.lockTtl = lockTtl;
     }
@@ -70,14 +65,8 @@ public class IdempotentTransferService {
     }
 
     private TransferResponse executeTransfer(BankingPrincipal actor, String idempotencyKey, TransferRequest request) {
-        if (idempotencyKey == null || !idempotencyKey.matches(KEY_PATTERN)) {
-            throw new BusinessException("INVALID_IDEMPOTENCY_KEY",
-                    "Idempotency-Key must contain 8 to 128 letters, digits, dot, underscore, colon, or hyphen",
-                    HttpStatus.BAD_REQUEST);
-        }
-        BigDecimal amount = Money.requireValid(request.amount());
-        String requestHash = fingerprint(request.sourceAccountId(), request.destinationAccountId(), amount,
-                request.description());
+        TransferRequestValidator.ValidatedRequest validated = requestValidator.validate(idempotencyKey, request);
+        String requestHash = validated.requestHash();
         try {
             TransferResponse cached = cached(actor.userId(), idempotencyKey, requestHash);
             if (cached != null) {
@@ -109,8 +98,8 @@ public class IdempotentTransferService {
                     if (existing != null) {
                         return existing;
                     }
-                    TransferResponse created = transferService.transfer(actor, request.sourceAccountId(),
-                            request.destinationAccountId(), amount, request.description());
+                    TransferResponse created = transferService.transfer(actor, validated.sourceAccountId(),
+                            validated.destinationAccountId(), validated.amount(), validated.description());
                     idempotencyRecords.saveAndFlush(new TransferIdempotency(actor.userId(), idempotencyKey,
                             requestHash, created.id(), Instant.now().plus(resultTtl)));
                     return created;
@@ -118,8 +107,8 @@ public class IdempotentTransferService {
             } catch (RuntimeException failure) {
                 String failureCode = failure instanceof BusinessException business
                         ? business.getCode() : "TRANSFER_PROCESSING_FAILED";
-                events.publish(BankingEvent.transferFailed(actor.userId(), request.sourceAccountId(),
-                        request.destinationAccountId(), failureCode));
+                events.publish(BankingEvent.transferFailed(actor.userId(), validated.sourceAccountId(),
+                        validated.destinationAccountId(), failureCode));
                 throw failure;
             }
             try {
@@ -162,21 +151,6 @@ public class IdempotentTransferService {
                 requestHash.getBytes(StandardCharsets.US_ASCII))) {
             throw new BusinessException("IDEMPOTENCY_KEY_REUSED",
                     "Idempotency-Key was already used for a different transfer request", HttpStatus.CONFLICT);
-        }
-    }
-
-    private String fingerprint(UUID source, UUID destination, BigDecimal amount, String description) {
-        if (source == null || destination == null) {
-            throw new BusinessException("ACCOUNT_NOT_FOUND", "Both account IDs are required", HttpStatus.NOT_FOUND);
-        }
-        String encodedDescription = Base64.getEncoder().encodeToString(
-                (description == null ? "" : description).getBytes(StandardCharsets.UTF_8));
-        String canonical = source + "\n" + destination + "\n" + amount.toPlainString() + "\n" + encodedDescription;
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(canonical.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("SHA-256 is not available", impossible);
         }
     }
 
