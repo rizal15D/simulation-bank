@@ -105,6 +105,58 @@ class BankingApiIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void authenticationLifecycleRejectsMissingInvalidAndLoggedOutTokens() throws Exception {
+        String customerId = customer("Session Owner", "session-owner@example.com");
+        String token = customerTokens.get(customerId);
+        String path = "/api/v1/customers/" + customerId;
+
+        assertError(response(send("GET", path, null, null, Map.of())), 401, "UNAUTHORIZED");
+        assertError(response(send("GET", path, null, "not-a-valid-session-token", Map.of())),
+                401, "UNAUTHORIZED");
+        assertEquals(200, response(send("GET", path, null, token, Map.of())).status());
+
+        ApiResponse logout = response(send("POST", "/api/v1/auth/logout", null, token, Map.of()));
+        assertEquals(204, logout.status());
+        assertTrue(logout.body().isEmpty());
+        assertError(response(send("GET", path, null, token, Map.of())), 401, "UNAUTHORIZED");
+    }
+
+    @Test
+    void customerCannotReadOrMutateAnotherCustomersResources() throws Exception {
+        String ownerId = customer("Account Owner", "account-owner@example.com");
+        String ownerAccount = openAccount(ownerId).get("id").toString();
+        assertEquals(201, amount(ownerAccount, "deposit", "100").status());
+
+        String intruderId = customer("Other Customer", "other-customer@example.com");
+        String intruderToken = customerTokens.get(intruderId);
+        String intruderAccount = openAccount(intruderId).get("id").toString();
+
+        assertError(response(send("GET", "/api/v1/customers/" + ownerId, null,
+                intruderToken, Map.of())), 403, "FORBIDDEN");
+        assertError(response(send("GET", "/api/v1/customers/" + ownerId + "/accounts", null,
+                intruderToken, Map.of())), 403, "FORBIDDEN");
+        assertError(response(send("GET", "/api/v1/accounts/" + ownerAccount, null,
+                intruderToken, Map.of())), 403, "FORBIDDEN");
+        assertError(response(send("GET", "/api/v1/accounts/" + ownerAccount + "/transactions", null,
+                intruderToken, Map.of())), 403, "FORBIDDEN");
+        assertError(response(send("POST", "/api/v1/accounts/" + ownerAccount + "/deposit",
+                Map.of("amount", 10), intruderToken, Map.of())), 403, "FORBIDDEN");
+        assertError(response(send("POST", "/api/v1/accounts/" + ownerAccount + "/withdraw",
+                Map.of("amount", 10), intruderToken, Map.of())), 403, "FORBIDDEN");
+        assertError(response(send("POST", "/api/v1/transfers", Map.of(
+                        "sourceAccountId", ownerAccount,
+                        "destinationAccountId", intruderAccount,
+                        "amount", 10,
+                        "description", "Forbidden transfer"), intruderToken,
+                Map.of("Idempotency-Key", UUID.randomUUID().toString()))), 403, "FORBIDDEN");
+
+        assertBalance(ownerAccount, "100");
+        assertBalance(intruderAccount, "0");
+        assertEquals(1L, count("account_transactions"));
+        assertEquals(0L, count("transfers"));
+    }
+
+    @Test
     void customerValidationUniquenessAndMissingResourcesUseErrors() throws Exception {
         assertError(postPublic("/api/v1/auth/register", Map.of(
                 "fullName", "", "email", "broken", "password", PASSWORD)), 400);
