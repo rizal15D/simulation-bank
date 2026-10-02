@@ -406,6 +406,54 @@ class BankingApiIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void committedTransferSurvivesRabbitOutageAndPublishesAfterRecovery() throws Exception {
+        String source = newAccount();
+        String destination = newAccount();
+        assertEquals(201, amount(source, "deposit", "100").status());
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertEquals(0L,
+                jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE status = 'PENDING'", Long.class)));
+
+        boolean rabbitApplicationStopped = false;
+        UUID eventId;
+        UUID transferId;
+        try {
+            assertEquals(0, RABBITMQ.execInContainer("rabbitmqctl", "stop_app").getExitCode());
+            rabbitApplicationStopped = true;
+
+            ApiResponse completed = transfer(source, destination, "25");
+            assertEquals(201, completed.status(), completed.body().toString());
+            transferId = UUID.fromString(completed.body().get("id").toString());
+            eventId = jdbc.queryForObject("""
+                    SELECT id FROM outbox_events
+                    WHERE event_type = 'TRANSFER_COMPLETED'
+                      AND payload::jsonb ->> 'resourceId' = ?
+                    """, UUID.class, transferId.toString());
+
+            assertBalance(source, "75");
+            assertBalance(destination, "25");
+            await().atMost(Duration.ofSeconds(15)).pollInterval(Duration.ofMillis(200)).untilAsserted(() -> {
+                assertEquals("PENDING", jdbc.queryForObject(
+                        "SELECT status FROM outbox_events WHERE id = ?", String.class, eventId));
+                assertTrue(jdbc.queryForObject(
+                        "SELECT attempt_count FROM outbox_events WHERE id = ?", Integer.class, eventId) >= 1);
+            });
+        } finally {
+            if (rabbitApplicationStopped) {
+                assertEquals(0, RABBITMQ.execInContainer("rabbitmqctl", "start_app").getExitCode());
+            }
+        }
+
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(200)).untilAsserted(() -> {
+            assertEquals("PUBLISHED", jdbc.queryForObject(
+                    "SELECT status FROM outbox_events WHERE id = ?", String.class, eventId));
+            assertEquals(1L, jdbc.queryForObject(
+                    "SELECT count(*) FROM audit_logs WHERE event_id = ?", Long.class, eventId));
+            assertEquals(2L, jdbc.queryForObject(
+                    "SELECT count(*) FROM notifications WHERE event_id = ?", Long.class, eventId));
+        });
+    }
+
+    @Test
     void transferRollsBackAfterDestinationHistoryWriteFails() throws Exception {
         String source = newAccount();
         String destination = newAccount();
