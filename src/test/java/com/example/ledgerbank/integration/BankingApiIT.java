@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.env.Environment;
@@ -53,6 +54,7 @@ class BankingApiIT extends AbstractIntegrationTest {
     @Autowired private ObjectMapper json;
     @Autowired private StringRedisTemplate redis;
     @Autowired private RabbitTemplate rabbit;
+    @Autowired private RabbitListenerEndpointRegistry rabbitListeners;
     @Autowired private AppUserRepository users;
     @Autowired private PasswordEncoder passwords;
 
@@ -76,9 +78,19 @@ class BankingApiIT extends AbstractIntegrationTest {
     void cleanDedicatedDatabase() {
         // Repeat the guard immediately before the destructive operation.
         assertTrue(jdbc.queryForObject("SELECT current_database()", String.class).endsWith("_test"));
-        jdbc.execute("TRUNCATE outbox_events, account_transactions, transfers, accounts, customers CASCADE");
-        try (RedisConnection connection = redis.getConnectionFactory().getConnection()) {
-            connection.serverCommands().flushDb();
+        rabbitListeners.stop();
+        try {
+            rabbit.execute(channel -> {
+                channel.queuePurge(RabbitMqConfig.NOTIFICATION_QUEUE);
+                channel.queuePurge(RabbitMqConfig.AUDIT_QUEUE);
+                return null;
+            });
+            jdbc.execute("TRUNCATE outbox_events, account_transactions, transfers, accounts, customers CASCADE");
+            try (RedisConnection connection = redis.getConnectionFactory().getConnection()) {
+                connection.serverCommands().flushDb();
+            }
+        } finally {
+            rabbitListeners.start();
         }
         customerTokens.clear();
         accountTokens.clear();

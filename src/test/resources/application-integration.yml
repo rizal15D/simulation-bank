@@ -11,3 +11,7 @@ spring:
     redis:
       repositories:
         enabled: false
+  rabbitmq:
+    listener:
+      simple:
+        default-requeue-rejected: false
