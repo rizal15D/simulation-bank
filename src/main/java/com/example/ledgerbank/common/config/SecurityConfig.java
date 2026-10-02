@@ -37,7 +37,8 @@ public class SecurityConfig {
                         .accessDeniedHandler((request, response, exception) -> errors.write(response,
                                 HttpStatus.FORBIDDEN.value(), "FORBIDDEN", "You are not allowed to perform this operation")))
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/error", "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/error", "/swagger-ui.html", "/swagger-ui/**",
+                                "/v3/api-docs", "/v3/api-docs.yaml", "/v3/api-docs/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/customers").hasRole("ADMIN")

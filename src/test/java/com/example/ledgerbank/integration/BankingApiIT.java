@@ -7,8 +7,9 @@ import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.env.Environment;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.DeserializationFeature;
 
@@ -22,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -33,12 +35,18 @@ import static org.junit.jupiter.api.Assertions.*;
  * Run explicitly with the integration Maven profile against a dedicated *_test database.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@ActiveProfiles("integration")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class BankingApiIT {
+class BankingApiIT extends AbstractIntegrationTest {
+    private static final String PASSWORD = "integration-pass-2026";
+
     @Autowired private Environment environment;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ObjectMapper json;
+    @Autowired private StringRedisTemplate redis;
+
+    private final Map<String, String> customerTokens = new ConcurrentHashMap<>();
+    private final Map<String, String> accountTokens = new ConcurrentHashMap<>();
+    private volatile String currentToken;
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10)).build();
@@ -57,6 +65,12 @@ class BankingApiIT {
         // Repeat the guard immediately before the destructive operation.
         assertTrue(jdbc.queryForObject("SELECT current_database()", String.class).endsWith("_test"));
         jdbc.execute("TRUNCATE account_transactions, transfers, accounts, customers CASCADE");
+        try (RedisConnection connection = redis.getConnectionFactory().getConnection()) {
+            connection.serverCommands().flushDb();
+        }
+        customerTokens.clear();
+        accountTokens.clear();
+        currentToken = null;
     }
 
     @Test
@@ -92,15 +106,17 @@ class BankingApiIT {
 
     @Test
     void customerValidationUniquenessAndMissingResourcesUseErrors() throws Exception {
-        assertError(post("/api/v1/customers", Map.of("fullName", "", "email", "broken")), 400);
+        assertError(postPublic("/api/v1/auth/register", Map.of(
+                "fullName", "", "email", "broken", "password", PASSWORD)), 400);
         customer("First", "duplicate@example.com");
-        assertError(post("/api/v1/customers", Map.of("fullName", "Second", "email", "DUPLICATE@example.com")), 409);
+        assertError(postPublic("/api/v1/auth/register", Map.of(
+                "fullName", "Second", "email", "DUPLICATE@example.com", "password", PASSWORD)), 409);
 
         String missing = UUID.randomUUID().toString();
-        assertError(get("/api/v1/customers/" + missing), 404);
-        assertError(post("/api/v1/accounts", Map.of("customerId", missing)), 404);
+        assertError(get("/api/v1/customers/" + missing), 403, "FORBIDDEN");
+        assertError(post("/api/v1/accounts", Map.of("customerId", missing)), 403, "FORBIDDEN");
         assertError(get("/api/v1/accounts/" + missing), 404);
-        assertError(get("/api/v1/customers/" + missing + "/accounts"), 404);
+        assertError(get("/api/v1/customers/" + missing + "/accounts"), 403, "FORBIDDEN");
         assertError(get("/api/v1/accounts/" + missing + "/transactions"), 404);
         assertError(get("/api/v1/accounts/not-a-uuid"), 400);
         assertEquals(1L, count("customers"));
@@ -109,13 +125,15 @@ class BankingApiIT {
 
     @Test
     void malformedHttpRequestsKeepTheirClientErrorStatuses() throws Exception {
+        String customerId = customer("Malformed Request User", "malformed@example.com");
         assertError(get("/api/v1/does-not-exist"), 404);
-        assertError(response(send("DELETE", "/api/v1/customers/" + UUID.randomUUID(), null)), 405);
-        assertError(response(send("POST", "/api/v1/customers", null)), 400);
-        assertError(response(sendRaw("POST", "/api/v1/customers", "{", "application/json")), 400);
-        assertError(response(sendRaw("POST", "/api/v1/customers", "null", "application/json")), 400);
-        assertError(response(sendRaw("POST", "/api/v1/customers", "plain text", "text/plain")), 415);
-        assertEquals(0L, count("customers"));
+        assertError(response(send("DELETE", "/api/v1/customers/" + customerId, null)), 405);
+        assertError(response(send("POST", "/api/v1/accounts", null)), 400);
+        assertError(response(sendRaw("POST", "/api/v1/accounts", "{", "application/json")), 400);
+        assertError(response(sendRaw("POST", "/api/v1/accounts", "null", "application/json")), 400);
+        assertError(response(sendRaw("POST", "/api/v1/accounts", "plain text", "text/plain")), 415);
+        assertEquals(1L, count("customers"));
+        assertEquals(0L, count("accounts"));
     }
 
     @Test
@@ -391,14 +409,24 @@ class BankingApiIT {
     }
 
     private String customer(String name, String email) throws Exception {
-        ApiResponse response = post("/api/v1/customers", Map.of("fullName", name, "email", email));
-        assertEquals(201, response.status(), response.body().toString());
-        return response.body().get("id").toString();
+        ApiResponse registered = postPublic("/api/v1/auth/register", Map.of(
+                "fullName", name, "email", email, "password", PASSWORD));
+        assertEquals(201, registered.status(), registered.body().toString());
+        String customerId = registered.body().get("customerId").toString();
+
+        ApiResponse login = postPublic("/api/v1/auth/login", Map.of("email", email, "password", PASSWORD));
+        assertEquals(200, login.status(), login.body().toString());
+        String token = login.body().get("accessToken").toString();
+        customerTokens.put(customerId, token);
+        currentToken = token;
+        return customerId;
     }
 
     private Map<String, Object> openAccount(String customerId) throws Exception {
-        ApiResponse response = post("/api/v1/accounts", Map.of("customerId", customerId));
+        ApiResponse response = response(send("POST", "/api/v1/accounts", Map.of("customerId", customerId),
+                customerTokens.get(customerId), Map.of()));
         assertEquals(201, response.status(), response.body().toString());
+        accountTokens.put(response.body().get("id").toString(), customerTokens.get(customerId));
         return response.body();
     }
 
@@ -407,14 +435,15 @@ class BankingApiIT {
     }
 
     private ApiResponse amount(String accountId, String operation, String amount) throws Exception {
-        return post("/api/v1/accounts/" + accountId + "/" + operation,
-                Map.of("amount", new BigDecimal(amount)));
+        return response(send("POST", "/api/v1/accounts/" + accountId + "/" + operation,
+                Map.of("amount", new BigDecimal(amount)), accountTokens.getOrDefault(accountId, currentToken), Map.of()));
     }
 
     private ApiResponse transfer(String source, String destination, String amount) throws Exception {
-        return post("/api/v1/transfers", Map.of("sourceAccountId", source,
-                "destinationAccountId", destination, "amount", new BigDecimal(amount),
-                "description", "Integration transfer"));
+        return response(send("POST", "/api/v1/transfers", Map.of("sourceAccountId", source,
+                        "destinationAccountId", destination, "amount", new BigDecimal(amount),
+                        "description", "Integration transfer"), accountTokens.getOrDefault(source, currentToken),
+                Map.of("Idempotency-Key", UUID.randomUUID().toString())));
     }
 
     private void assertBalance(String accountId, String expected) throws Exception {
@@ -465,22 +494,41 @@ class BankingApiIT {
     }
 
     private ApiResponse get(String path) throws Exception {
-        return response(send("GET", path, null));
+        return response(send("GET", path, null, tokenFor(path), Map.of()));
     }
 
     private ApiResponse post(String path, Map<String, Object> body) throws Exception {
-        return response(send("POST", path, body));
+        return response(send("POST", path, body, currentToken, Map.of()));
+    }
+
+    private ApiResponse postPublic(String path, Map<String, Object> body) throws Exception {
+        return response(send("POST", path, body, null, Map.of()));
     }
 
     private HttpResponse<String> send(String method, String path, Map<String, Object> body) throws Exception {
-        return sendRaw(method, path, body == null ? null : json.writeValueAsString(body), "application/json");
+        return send(method, path, body, tokenFor(path), Map.of());
+    }
+
+    private HttpResponse<String> send(String method, String path, Map<String, Object> body,
+                                      String token, Map<String, String> headers) throws Exception {
+        return sendRaw(method, path, body == null ? null : json.writeValueAsString(body),
+                "application/json", token, headers);
     }
 
     private HttpResponse<String> sendRaw(String method, String path, String body, String contentType) throws Exception {
+        return sendRaw(method, path, body, contentType, tokenFor(path), Map.of());
+    }
+
+    private HttpResponse<String> sendRaw(String method, String path, String body, String contentType,
+                                         String token, Map<String, String> headers) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:"
                         + environment.getRequiredProperty("local.server.port") + path))
                 .timeout(Duration.ofSeconds(20))
                 .header("Accept", "application/json");
+        if (token != null) {
+            request.header("Authorization", "Bearer " + token);
+        }
+        headers.forEach(request::header);
         if (body == null) {
             request.method(method, HttpRequest.BodyPublishers.noBody());
         } else {
@@ -488,6 +536,20 @@ class BankingApiIT {
                     .method(method, HttpRequest.BodyPublishers.ofString(body));
         }
         return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private String tokenFor(String path) {
+        for (Map.Entry<String, String> entry : accountTokens.entrySet()) {
+            if (path.contains(entry.getKey())) {
+                return entry.getValue();
+            }
+        }
+        for (Map.Entry<String, String> entry : customerTokens.entrySet()) {
+            if (path.contains(entry.getKey())) {
+                return entry.getValue();
+            }
+        }
+        return currentToken;
     }
 
     @SuppressWarnings("unchecked")

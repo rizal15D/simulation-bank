@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.env.Environment;
-import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -19,8 +18,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@ActiveProfiles("integration")
-class OpenApiIT {
+class OpenApiIT extends AbstractIntegrationTest {
     @Autowired private Environment environment;
     @Autowired private ObjectMapper json;
     private final HttpClient http = HttpClient.newBuilder()
@@ -34,26 +32,35 @@ class OpenApiIT {
         JsonNode document = json.readTree(response.body());
         assertTrue(document.path("openapi").asText().startsWith("3."));
         assertEquals("LedgerBank API", document.path("info").path("title").asText());
-        Map<String, String> operations = Map.of(
-                "/api/v1/health", "get",
-                "/api/v1/customers", "post",
-                "/api/v1/customers/{customerId}", "get",
-                "/api/v1/accounts", "post",
-                "/api/v1/accounts/{accountId}", "get",
-                "/api/v1/customers/{customerId}/accounts", "get",
-                "/api/v1/accounts/{accountId}/deposit", "post",
-                "/api/v1/accounts/{accountId}/withdraw", "post",
-                "/api/v1/accounts/{accountId}/transactions", "get",
-                "/api/v1/transfers", "post");
+        Map<String, String> operations = Map.ofEntries(
+                Map.entry("/api/v1/auth/register", "post"),
+                Map.entry("/api/v1/auth/login", "post"),
+                Map.entry("/api/v1/auth/logout", "post"),
+                Map.entry("/api/v1/health", "get"),
+                Map.entry("/api/v1/customers", "post"),
+                Map.entry("/api/v1/customers/{customerId}", "get"),
+                Map.entry("/api/v1/accounts", "post"),
+                Map.entry("/api/v1/accounts/{accountId}", "get"),
+                Map.entry("/api/v1/customers/{customerId}/accounts", "get"),
+                Map.entry("/api/v1/accounts/{accountId}/deposit", "post"),
+                Map.entry("/api/v1/accounts/{accountId}/withdraw", "post"),
+                Map.entry("/api/v1/accounts/{accountId}/transactions", "get"),
+                Map.entry("/api/v1/transfers", "post"));
         assertEquals(operations.size(), document.path("paths").size());
         operations.forEach((path, method) -> {
             JsonNode operation = document.path("paths").path(path).path(method);
             assertFalse(operation.isMissingNode(), path);
             assertFalse(operation.path("summary").asText().isBlank(), path);
             assertEquals(1, operation.path("tags").size(), path);
-            String status = method.equals("post") ? "201" : "200";
+            String status = switch (path) {
+                case "/api/v1/auth/login" -> "200";
+                case "/api/v1/auth/logout" -> "204";
+                default -> method.equals("post") ? "201" : "200";
+            };
             assertTrue(operation.path("responses").has(status), path + " must document HTTP " + status);
-            assertTrue(operation.path("responses").path(status).has("content"), path);
+            if (!status.equals("204")) {
+                assertTrue(operation.path("responses").path(status).has("content"), path);
+            }
         });
         JsonNode customerCreated = document.path("paths").path("/api/v1/customers")
                 .path("post").path("responses").path("201");
