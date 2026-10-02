@@ -12,12 +12,16 @@ const warmupDuration = __ENV.WARMUP_DURATION || '15s';
 const measurementDuration = __ENV.DURATION || '30s';
 const requestTimeout = __ENV.REQUEST_TIMEOUT || '30s';
 const initialBalance = Number(__ENV.INITIAL_BALANCE || '1000000000');
+const transferAccountMode = (__ENV.TRANSFER_ACCOUNT_MODE || 'isolated').toLowerCase();
 
 if (!['history', 'transfer'].includes(workload)) {
   throw new Error('WORKLOAD must be history or transfer');
 }
 if (!Number.isFinite(initialBalance) || initialBalance <= 0) {
   throw new Error('INITIAL_BALANCE must be a positive number');
+}
+if (!['isolated', 'shared'].includes(transferAccountMode)) {
+  throw new Error('TRANSFER_ACCOUNT_MODE must be isolated or shared');
 }
 
 const measuredLatency = new Trend('ledgerbank_latency', true);
@@ -78,7 +82,8 @@ export function setup() {
   // k6 allocates different VU ids to sequential scenarios. Two pairs per configured
   // VU keep both warm-up and measurement free from artificial cross-VU account locks.
   const pairs = [];
-  for (let index = 0; index < virtualUsers * 2; index += 1) {
+  const pairCount = workload === 'transfer' && transferAccountMode === 'shared' ? 1 : virtualUsers * 2;
+  for (let index = 0; index < pairCount; index += 1) {
     const source = createAccount(customerId, token, `source-${index}`);
     const destination = createAccount(customerId, token, `destination-${index}`);
     deposit(source, initialBalance, token, `fund-source-${index}`);
@@ -121,7 +126,8 @@ function historyRequest(data, measured) {
 }
 
 function transferRequest(data, measured) {
-  const pair = data.pairs[(exec.vu.idInTest - 1) % data.pairs.length];
+  const pairIndex = transferAccountMode === 'shared' ? 0 : (exec.vu.idInTest - 1) % data.pairs.length;
+  const pair = data.pairs[pairIndex];
   const key = `perf-${exec.vu.idInTest}-${exec.scenario.iterationInTest}-${Date.now()}`;
   const parameters = requestParameters(data.token, measured ? 'measurement' : 'warmup', 'transfer');
   parameters.headers['Idempotency-Key'] = key;
@@ -145,7 +151,7 @@ function record(response, expectedStatus, operation, measured) {
   const successful = check(response, {
     [`${operation} returned HTTP ${expectedStatus}`]: (result) => result.status === expectedStatus,
   }, { phase: 'measurement', flow: workload });
-  const metricTags = { flow: workload, operation };
+  const metricTags = { flow: workload, operation, account_mode: transferAccountMode };
   measuredLatency.add(response.timings.duration, metricTags);
   measuredErrors.add(!successful, metricTags);
   measuredRequests.add(1, metricTags);

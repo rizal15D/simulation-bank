@@ -8,6 +8,9 @@ docs/*
 !docs/redis.md
 !docs/performance/
 !docs/performance/**
+!docs/assets/
+!docs/assets/performance/
+!docs/assets/performance/**
 /target/
 /.tools/
 /.m2/

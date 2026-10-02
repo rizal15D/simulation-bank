@@ -117,7 +117,8 @@ Tidak ada allocation stall atau full GC pada snapshot final. JFR menamai concurr
 sebagai `Old Garbage Collection`; pause terpanjang di atas tetap singkat dan heap kembali ke sekitar
 50 MiB. Allocation pressure history paling besar berada pada pembuatan `Instant` (48,71%) dan
 `QueryOptionsImpl` (5,32%). Transfer lebih tersebar pada iterator/collection serta observation
-Micrometer. Temuan hotspot dan thread dibahas lebih lanjut pada `jvm-analysis.md`.
+Micrometer. Temuan hotspot dan thread dibahas lebih lanjut pada
+[`jvm-analysis.md`](jvm-analysis.md).
 
 ## Interpretasi dan keterbatasan
 

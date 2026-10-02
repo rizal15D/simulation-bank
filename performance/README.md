@@ -51,6 +51,7 @@ Gunakan konfigurasi yang sama untuk perbandingan sebelum/sesudah. Parameter yang
 | `HISTORY_ENTRIES` | `1000` | Jumlah entry pada rekening history |
 | `INITIAL_BALANCE` | `1000000000` | Saldo sintetis awal setiap rekening |
 | `REQUEST_TIMEOUT` | `30s` | Timeout setiap request |
+| `TRANSFER_ACCOUNT_MODE` | `isolated` | `isolated` untuk baseline atau `shared` untuk profiling lock contention |
 
 Gunakan metrik khusus berikut untuk baseline karena metrik HTTP bawaan juga mencakup setup dan
 warm-up:
@@ -64,3 +65,6 @@ Setup membuat dua pasangan rekening per VU. Masing-masing VU transfer mendapat p
 agar baseline mengukur alur write normal, bukan kontensi lock yang sudah memiliki concurrency test
 terpisah. Dataset sengaja tidak dihapus agar query plan dan profiling terhadap run yang sama dapat
 dianalisis; gunakan hanya database development yang dapat dibuang.
+
+Mode `TRANSFER_ACCOUNT_MODE=shared` membuat seluruh VU memakai pasangan account yang sama. Gunakan
+hanya untuk observasi lock/Hikari dan jangan bandingkan throughput-nya dengan baseline `isolated`.

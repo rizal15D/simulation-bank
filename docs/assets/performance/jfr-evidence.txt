@@ -1,0 +1,65 @@
+LedgerBank Milestone 3 - JFR evidence (2026-10-03)
+==================================================
+
+Commands
+--------
+jcmd <pid> JFR.start name=<name> settings=profile filename=<file> maxsize=250m dumponexit=true
+jcmd <pid> JFR.stop name=<name>
+jfr view recording|cpu-load|hot-methods|thread-cpu-load|allocation-by-site <file>
+jfr view latencies-by-type|contention-by-site|socket-reads-by-host|gc <file>
+
+Raw recordings are local artifacts under target/performance and are intentionally not committed.
+
+history-final.jfr
+-----------------
+Events: 69,478
+Length: 1 m 26 s (thread allocation sample span: 85.527 s)
+CPU: JVM user avg 6.81%, JVM system avg 3.90%, machine avg 56.71%
+Allocation: 1,874,933,144 bytes; 20.91 MiB/s lifecycle rate
+Allocation sites: Instant.create 48.71%; QueryOptionsImpl.<init> 5.32%
+GC: heap about 98 MiB before and 50 MiB after; longest pause 12.6 ms
+Thread count: 42-43 active, peak 43
+Socket read: 18,113; avg 2.17 ms; p99 6.06 ms; longest 801 ms
+Java monitor contention events: none
+
+transfer-final.jfr
+------------------
+Events: 57,645
+Length: 1 m 12 s (thread allocation sample span: 71.966 s)
+CPU: JVM user avg 7.26%, JVM system avg 4.42%, machine avg 66.12%
+Allocation: 989,315,552 bytes; 13.11 MiB/s lifecycle rate
+Allocation sites are distributed; top sampled sites are collection/observation/servlet/JDBC objects
+GC: heap about 98 MiB before and 50 MiB after; longest pause 13.0 ms
+Thread count: 42-43 active, peak 43
+Socket read: 15,426; avg 3.81 ms; p99 9.73 ms; longest 6.64 s
+Java monitor contention events: none
+
+lock-contention-final.jfr and live sampling
+-------------------------------------------
+Events: 38,008
+Length: 1 m 34 s
+Workload: TRANSFER_ACCOUNT_MODE=shared, VUS=40, warm-up=5 s, duration=20 s
+CPU: JVM user avg 1.96%, JVM system avg 1.54%, machine avg 44.68%
+GC: longest pause 19.0 ms; no allocation stall/full GC observed
+Socket read: 9,857; avg 20.3 ms; p99 381 ms; longest 15.0 s
+Thread park: 4,548; avg 1.15 s; p99 23.9 s
+Thread count: baseline 42-43, peak 113
+Java monitor contention events: none
+
+Hikari metrics (ADMIN-protected Actuator sampling):
+- configured max: 10
+- active peak: 10
+- pending peak: 63
+- timeout counter: 0
+
+PostgreSQL pg_stat_activity samples:
+- Lock:tuple up to 8 concurrent waiters
+- Lock:transactionid 1 waiter
+- Client:ClientRead for idle/active client sessions
+
+jcmd Thread.print captured while active=10 and pending>0:
+- 31 HTTP threads WAITING/TIMED_WAITING with ConcurrentBag.borrow frames
+- 10 HTTP threads RUNNABLE with PGStream.receive frames
+
+Interpretation: the shared-account wait is external PostgreSQL row/transaction locking plus Hikari
+AQS parking, not intrinsic Java monitor contention. The pool applied backpressure without timeout.
