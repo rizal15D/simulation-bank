@@ -321,6 +321,37 @@ class BankingApiIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void durableTransferIdempotencySurvivesRedisCacheMiss() throws Exception {
+        String source = newAccount();
+        String destination = newAccount();
+        assertEquals(201, amount(source, "deposit", "100").status());
+        String key = "durable-retry-" + UUID.randomUUID();
+
+        ApiResponse first = transfer(source, destination, "40", key);
+        ApiResponse cachedRetry = transfer(source, destination, "40", key);
+        assertEquals(201, first.status());
+        assertEquals(201, cachedRetry.status());
+        assertEquals(first.body().get("id"), cachedRetry.body().get("id"));
+        assertEquals(1L, count("transfers"));
+        assertEquals(1L, jdbc.queryForObject("SELECT count(*) FROM transfer_idempotency", Long.class));
+
+        var cacheKeys = redis.keys("idempotency:transfer:*");
+        assertFalse(cacheKeys.isEmpty(), "The successful transfer should be cached in Redis");
+        redis.delete(cacheKeys);
+
+        ApiResponse databaseRetry = transfer(source, destination, "40", key);
+        assertEquals(201, databaseRetry.status());
+        assertEquals(first.body().get("id"), databaseRetry.body().get("id"));
+        assertError(transfer(source, destination, "41", key), 409, "IDEMPOTENCY_KEY_REUSED");
+
+        assertBalance(source, "60");
+        assertBalance(destination, "40");
+        assertEquals(3L, count("account_transactions"));
+        assertEquals(1L, count("transfers"));
+        assertEquals(1L, jdbc.queryForObject("SELECT count(*) FROM transfer_idempotency", Long.class));
+    }
+
+    @Test
     void transferRollsBackAfterDestinationHistoryWriteFails() throws Exception {
         String source = newAccount();
         String destination = newAccount();
@@ -492,10 +523,15 @@ class BankingApiIT extends AbstractIntegrationTest {
     }
 
     private ApiResponse transfer(String source, String destination, String amount) throws Exception {
+        return transfer(source, destination, amount, UUID.randomUUID().toString());
+    }
+
+    private ApiResponse transfer(String source, String destination, String amount, String idempotencyKey)
+            throws Exception {
         return response(send("POST", "/api/v1/transfers", Map.of("sourceAccountId", source,
                         "destinationAccountId", destination, "amount", new BigDecimal(amount),
                         "description", "Integration transfer"), accountTokens.getOrDefault(source, currentToken),
-                Map.of("Idempotency-Key", UUID.randomUUID().toString())));
+                Map.of("Idempotency-Key", idempotencyKey)));
     }
 
     private void assertBalance(String accountId, String expected) throws Exception {
