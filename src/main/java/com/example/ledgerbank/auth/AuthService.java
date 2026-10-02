@@ -42,7 +42,7 @@ public class AuthService {
         return UserResponse.from(user);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public TokenResponse login(LoginRequest request) {
         String email = normalize(request.email());
         AppUser user = users.findByEmail(email).orElse(null);

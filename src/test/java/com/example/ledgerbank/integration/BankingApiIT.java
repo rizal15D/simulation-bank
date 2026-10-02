@@ -71,7 +71,7 @@ class BankingApiIT extends AbstractIntegrationTest {
     void cleanDedicatedDatabase() {
         // Repeat the guard immediately before the destructive operation.
         assertTrue(jdbc.queryForObject("SELECT current_database()", String.class).endsWith("_test"));
-        jdbc.execute("TRUNCATE account_transactions, transfers, accounts, customers CASCADE");
+        jdbc.execute("TRUNCATE outbox_events, account_transactions, transfers, accounts, customers CASCADE");
         try (RedisConnection connection = redis.getConnectionFactory().getConnection()) {
             connection.serverCommands().flushDb();
         }
@@ -444,6 +444,10 @@ class BankingApiIT extends AbstractIntegrationTest {
             assertBalance(destination, "0");
             assertEquals(entriesBefore, count("account_transactions"));
             assertEquals(transfersBefore, count("transfers"));
+            assertEquals(0L, jdbc.queryForObject(
+                    "SELECT count(*) FROM outbox_events WHERE event_type = 'TRANSFER_COMPLETED'", Long.class));
+            assertEquals(1L, jdbc.queryForObject(
+                    "SELECT count(*) FROM outbox_events WHERE event_type = 'TRANSFER_FAILED'", Long.class));
         } finally {
             jdbc.execute("DROP TRIGGER IF EXISTS integration_reject_destination_history ON account_transactions");
             jdbc.execute("DROP FUNCTION IF EXISTS integration_reject_destination_history()");
@@ -452,6 +456,8 @@ class BankingApiIT extends AbstractIntegrationTest {
 
         assertEquals(201, transfer(source, destination, "125").status(),
                 "The application must recover after the transaction rolls back");
+        assertEquals(1L, jdbc.queryForObject(
+                "SELECT count(*) FROM outbox_events WHERE event_type = 'TRANSFER_COMPLETED'", Long.class));
         assertBalance(source, "375");
         assertBalance(destination, "125");
     }
