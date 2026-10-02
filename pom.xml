@@ -16,6 +16,11 @@
     <properties>
         <java.version>25</java.version>
         <springdoc.version>3.1.1</springdoc.version>
+        <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
+        <spotbugs-maven-plugin.version>4.10.4.1</spotbugs-maven-plugin.version>
+        <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
+        <jacoco.unit.argLine></jacoco.unit.argLine>
+        <jacoco.integration.argLine></jacoco.integration.argLine>
     </properties>
     <dependencies>
         <dependency>
@@ -109,7 +114,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <argLine>-XX:+EnableDynamicAgentLoading</argLine>
+                    <argLine>@{jacoco.unit.argLine} -XX:+EnableDynamicAgentLoading</argLine>
                 </configuration>
             </plugin>
         </plugins>
@@ -123,11 +128,118 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-failsafe-plugin</artifactId>
                         <configuration>
-                            <argLine>-XX:+EnableDynamicAgentLoading</argLine>
+                            <argLine>@{jacoco.integration.argLine} -XX:+EnableDynamicAgentLoading</argLine>
                         </configuration>
                         <executions>
                             <execution>
                                 <goals><goal>integration-test</goal><goal>verify</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>quality</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <configuration>
+                            <showWarnings>true</showWarnings>
+                            <compilerArgs>
+                                <arg>-Xlint:all</arg>
+                            </compilerArgs>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-checkstyle-plugin</artifactId>
+                        <version>${maven-checkstyle-plugin.version}</version>
+                        <configuration>
+                            <configLocation>config/checkstyle/checkstyle.xml</configLocation>
+                            <includeTestSourceDirectory>true</includeTestSourceDirectory>
+                            <consoleOutput>true</consoleOutput>
+                            <failOnViolation>true</failOnViolation>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>check-format-and-imports</id>
+                                <phase>validate</phase>
+                                <goals>
+                                    <goal>check</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>com.github.spotbugs</groupId>
+                        <artifactId>spotbugs-maven-plugin</artifactId>
+                        <version>${spotbugs-maven-plugin.version}</version>
+                        <configuration>
+                            <effort>Max</effort>
+                            <threshold>Medium</threshold>
+                            <failOnError>true</failOnError>
+                            <xmlOutput>true</xmlOutput>
+                            <excludeFilterFile>config/spotbugs/exclude.xml</excludeFilterFile>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>spotbugs-check</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>check</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.jacoco</groupId>
+                        <artifactId>jacoco-maven-plugin</artifactId>
+                        <version>${jacoco-maven-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>prepare-unit-coverage</id>
+                                <goals>
+                                    <goal>prepare-agent</goal>
+                                </goals>
+                                <configuration>
+                                    <propertyName>jacoco.unit.argLine</propertyName>
+                                    <destFile>${project.build.directory}/jacoco-unit.exec</destFile>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>report-unit-coverage</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>report</goal>
+                                </goals>
+                                <configuration>
+                                    <dataFile>${project.build.directory}/jacoco-unit.exec</dataFile>
+                                    <outputDirectory>${project.reporting.outputDirectory}/jacoco</outputDirectory>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>prepare-integration-coverage</id>
+                                <goals>
+                                    <goal>prepare-agent-integration</goal>
+                                </goals>
+                                <configuration>
+                                    <propertyName>jacoco.integration.argLine</propertyName>
+                                    <destFile>${project.build.directory}/jacoco-integration.exec</destFile>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>report-integration-coverage</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>report-integration</goal>
+                                </goals>
+                                <configuration>
+                                    <dataFile>${project.build.directory}/jacoco-integration.exec</dataFile>
+                                    <outputDirectory>${project.reporting.outputDirectory}/jacoco-it</outputDirectory>
+                                </configuration>
                             </execution>
                         </executions>
                     </plugin>

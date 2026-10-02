@@ -36,8 +36,8 @@ jobs:
           grep -Eq '^distributionSha256Sum=[0-9a-f]{64}$' .mvn/wrapper/maven-wrapper.properties
           ./mvnw --batch-mode --version
 
-      - name: Build and run unit tests
-        run: ./mvnw --batch-mode --no-transfer-progress clean package
+      - name: Build, test, and run quality checks
+        run: ./mvnw --batch-mode --no-transfer-progress clean verify -Pquality
 
       - name: Upload unit-test reports on failure
         if: failure()
@@ -46,6 +46,18 @@ jobs:
           name: unit-test-reports
           path: target/surefire-reports/
           if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload quality reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: quality-reports
+          path: |
+            target/checkstyle-result.xml
+            target/spotbugsXml.xml
+            target/site/jacoco/
+          if-no-files-found: error
           retention-days: 14
 
   integration:
@@ -66,7 +78,7 @@ jobs:
           cache: maven
 
       - name: Run integration suite
-        run: ./mvnw --batch-mode --no-transfer-progress verify -Pintegration
+        run: ./mvnw --batch-mode --no-transfer-progress verify -Pintegration,quality
 
       - name: Upload integration-test reports on failure
         if: failure()

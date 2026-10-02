@@ -15,7 +15,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class OpenApiIT extends AbstractIntegrationTest {
@@ -30,8 +33,8 @@ class OpenApiIT extends AbstractIntegrationTest {
         HttpResponse<String> response = get("/v3/api-docs");
         assertEquals(200, response.statusCode(), response.body());
         JsonNode document = json.readTree(response.body());
-        assertTrue(document.path("openapi").asText().startsWith("3."));
-        assertEquals("LedgerBank API", document.path("info").path("title").asText());
+        assertTrue(document.path("openapi").asString().startsWith("3."));
+        assertEquals("LedgerBank API", document.path("info").path("title").asString());
         Map<String, String> operations = Map.ofEntries(
                 Map.entry("/api/v1/auth/register", "post"),
                 Map.entry("/api/v1/auth/login", "post"),
@@ -50,7 +53,7 @@ class OpenApiIT extends AbstractIntegrationTest {
         operations.forEach((path, method) -> {
             JsonNode operation = document.path("paths").path(path).path(method);
             assertFalse(operation.isMissingNode(), path);
-            assertFalse(operation.path("summary").asText().isBlank(), path);
+            assertFalse(operation.path("summary").asString().isBlank(), path);
             assertEquals(1, operation.path("tags").size(), path);
             String status = switch (path) {
                 case "/api/v1/auth/login" -> "200";
@@ -64,28 +67,28 @@ class OpenApiIT extends AbstractIntegrationTest {
         });
         JsonNode customerCreated = document.path("paths").path("/api/v1/customers")
                 .path("post").path("responses").path("201");
-        assertEquals("#/components/schemas/CustomerResponse", customerCreated.findValue("$ref").asText());
+        assertEquals("#/components/schemas/CustomerResponse", customerCreated.findValue("$ref").asString());
         JsonNode transfer = document.path("paths").path("/api/v1/transfers").path("post");
-        assertEquals("#/components/responses/Conflict", transfer.path("responses").path("409").path("$ref").asText());
+        assertEquals("#/components/responses/Conflict", transfer.path("responses").path("409").path("$ref").asString());
         JsonNode schemas = document.path("components").path("schemas");
         for (String property : List.of("code", "message", "timestamp")) {
             assertTrue(schemas.path("ApiError").path("properties").has(property), property);
         }
         assertEquals("Budi Santoso", schemas.path("CustomerCreateRequest").path("properties")
-                .path("fullName").path("example").asText());
+                .path("fullName").path("example").asString());
         assertTrue(schemas.path("AmountRequest").path("required").toString().contains("amount"));
-        assertEquals("number", schemas.path("AmountRequest").path("properties").path("amount").path("type").asText());
+        assertEquals("number", schemas.path("AmountRequest").path("properties").path("amount").path("type").asString());
         assertTrue(schemas.path("AmountRequest").path("properties").path("amount").path("exclusiveMinimum").asBoolean());
-        assertEquals("number", schemas.path("TransferResponse").path("properties").path("amount").path("type").asText());
-        assertEquals("number", schemas.path("AccountResponse").path("properties").path("balance").path("type").asText());
+        assertEquals("number", schemas.path("TransferResponse").path("properties").path("amount").path("type").asString());
+        assertEquals("number", schemas.path("AccountResponse").path("properties").path("balance").path("type").asString());
         JsonNode pagination = document.path("paths").path("/api/v1/accounts/{accountId}/transactions")
                 .path("get").path("parameters");
         JsonNode size = null;
         for (JsonNode parameter : pagination) {
-            if (parameter.path("name").asText().equals("size")) { size = parameter; }
+            if (parameter.path("name").asString().equals("size")) { size = parameter; }
         }
         assertNotNull(size);
-        assertEquals("integer", size.path("schema").path("type").asText());
+        assertEquals("integer", size.path("schema").path("type").asString());
         assertEquals(1, size.path("schema").path("minimum").asInt());
         assertEquals(100, size.path("schema").path("maximum").asInt());
         assertEquals(20, size.path("schema").path("default").asInt());
@@ -101,7 +104,7 @@ class OpenApiIT extends AbstractIntegrationTest {
         assertEquals(200, get("/swagger-ui/swagger-ui.css").statusCode());
         HttpResponse<String> config = get("/v3/api-docs/swagger-config");
         assertEquals(200, config.statusCode(), config.body());
-        assertEquals("/v3/api-docs", json.readTree(config.body()).path("url").asText());
+        assertEquals("/v3/api-docs", json.readTree(config.body()).path("url").asString());
         assertFalse(config.body().contains("petstore"));
         HttpResponse<String> yaml = get("/v3/api-docs.yaml");
         assertEquals(200, yaml.statusCode());

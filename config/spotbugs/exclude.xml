@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- Spring-managed collaborators are intentionally retained by constructor-injected beans. -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!-- The record constructor snapshots this list with List.copyOf, so the accessor is immutable. -->
+    <Match>
+        <Class name="com.example.ledgerbank.transaction.TransactionHistoryResponse"/>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
+
+    <!-- This JPA entity has no finalizer; constructor validation cannot enable a finalizer attack. -->
+    <Match>
+        <Class name="com.example.ledgerbank.event.OutboxEvent"/>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    </Match>
+</FindBugsFilter>
