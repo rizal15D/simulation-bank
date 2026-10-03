@@ -33,7 +33,7 @@ PostgreSQL adalah source of truth. Mutasi saldo, histori, transfer, durable idem
 
 ## Stack
 
-- Java 25, Spring Boot 4.1.1, Maven Wrapper.
+- LedgerBank 1.0.0 release candidate; Java 25, Spring Boot 4.1.1, Maven Wrapper.
 - Spring MVC, Spring Data JPA, Bean Validation, Spring Security.
 - PostgreSQL 18 dan Flyway. PostgreSQL adalah satu-satunya relational database; tidak ada MariaDB.
 - Redis 8.2 untuk opaque authentication session dan transfer idempotency.

@@ -62,4 +62,4 @@ Routing key aktif: `user.login`, `account.created`, `transfer.completed`, dan `t
 
 ## Release state
 
-Repository siap sebagai release candidate Milestone 3 setelah verifikasi lokal lengkap. Workflow CI sudah dikonfigurasi, tetapi tag `v1.0.0` tidak dibuat atau dipush otomatis. Tag hanya boleh dibuat secara sadar setelah commit final berada pada working tree bersih, remote GitHub Actions untuk commit tersebut lulus, migration database kosong berhasil, dan pemeriksaan secret selesai.
+Versi Maven telah disiapkan sebagai `1.0.0` dan repository siap sebagai release candidate Milestone 3 setelah verifikasi lokal lengkap. Workflow CI sudah dikonfigurasi, tetapi tag `v1.0.0` tidak dibuat atau dipush otomatis. Tag hanya boleh dibuat secara sadar setelah commit final berada pada working tree bersih, remote GitHub Actions untuk commit tersebut lulus, migration database kosong berhasil, dan pemeriksaan secret selesai.
