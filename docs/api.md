@@ -101,7 +101,24 @@ Perilaku retry:
 
 Redis menyimpan lock sementara dan cache result. PostgreSQL menyimpan fingerprint request dan transfer ID dalam transaksi database yang sama dengan transfer, sehingga retry tetap dapat dipulihkan jika cache result hilang. Saldo tidak didebit dua kali.
 
-Setelah transfer baru committed, aplikasi menerbitkan `TRANSFER_COMPLETED` ke RabbitMQ. Notification dan audit diproses asynchronous; response transfer tidak menunggu proses sampingan tersebut selesai. Retry idempotent yang mengembalikan transfer lama tidak menerbitkan completion event kedua. Milestone 2 belum menyediakan endpoint publik untuk membaca notification atau audit log.
+Transfer baru menyimpan `TRANSFER_COMPLETED` ke transactional outbox dalam transaction yang sama dengan transfer. Setelah commit, publisher terjadwal mengirim event ke RabbitMQ dengan publisher confirm dan retry. Notification dan audit diproses asynchronous; response transfer tidak menunggu broker atau consumer. Retry idempotent yang mengembalikan transfer lama tidak membuat completion event kedua. Belum ada endpoint publik untuk membaca notification atau audit log.
+
+Jika RabbitMQ offline, transfer yang valid tetap dapat sukses karena event sudah durable di PostgreSQL. Backlog akan dikirim setelah broker pulih. Delivery dapat berulang bila proses berhenti di antara broker confirm dan acknowledgement outbox; notification serta audit consumer idempotent terhadap event ID yang sama.
+
+## Management endpoint
+
+Actuator berada di luar prefix `/api/v1`:
+
+| Path | Akses | Keterangan |
+|---|---|---|
+| `GET /actuator/health` | Publik | Status agregat; detail hanya ADMIN |
+| `GET /actuator/health/liveness` | Publik | Application liveness |
+| `GET /actuator/health/readiness` | Publik | Application state, PostgreSQL, Redis |
+| `GET /actuator/info` | Publik | Info aman; environment detail dinonaktifkan |
+| `GET /actuator/metrics/**` | ADMIN | Metric runtime dan bisnis |
+| `GET /actuator/prometheus` | ADMIN | Prometheus scrape format |
+
+Path Actuator lain ditolak. `X-Correlation-ID` yang valid dikembalikan pada seluruh response; bila tidak diberikan, server membuat UUID baru.
 
 ## Contoh PowerShell
 

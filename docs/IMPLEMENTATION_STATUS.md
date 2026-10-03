@@ -1,6 +1,6 @@
-# Status implementasi: Milestone 2 selesai
+# Status implementasi: Milestone 3 selesai
 
-Verifikasi terakhir: 19 September 2026.
+Verifikasi lokal terakhir: 3 Oktober 2026.
 
 PostgreSQL 18 adalah satu-satunya relational database. MariaDB tidak ada pada dependency, migration, Compose, profile, atau rencana test berikutnya.
 
@@ -8,29 +8,28 @@ PostgreSQL 18 adalah satu-satunya relational database. MariaDB tidak ada pada de
 
 | Kriteria | Status dan bukti |
 |---|---|
-| Authentication | Register/login/logout aktif; BCrypt dan opaque Redis session |
-| Authorization | Role CUSTOMER/ADMIN dan JSON 401/403 aktif |
-| Account ownership | Read dan money mutation diperiksa di service; transfer source wajib milik actor |
-| Swagger/OpenAPI | Swagger UI, JSON/YAML spec, bearer scheme, 13 API path |
-| Redis | Container healthy; session, idempotency cache, dan lock ber-TTL |
-| Transfer idempotency | Redis coordination + durable PostgreSQL record; replay tidak memindahkan uang dua kali |
-| RabbitMQ | Durable topic exchange, notification queue, audit queue, dan JSON converter |
-| Transfer event | `TRANSFER_COMPLETED` diterbitkan setelah database commit; failure event juga tersedia |
-| Notification consumer | Event completion membuat notification idempotent untuk customer terkait |
-| Audit log | Login, account creation, transfer completion/failure dicatat asynchronous |
-| Docker infrastructure | PostgreSQL 18, Redis 8.2, RabbitMQ 4.1 management dan healthcheck |
-| Environment config | `application.yml`, `application-local.yml`, `application-test.yml`, `.env.example` |
-| Test utama | 75 unit/MVC test; 0 failure, 0 error, 0 skipped |
+| Baseline M1/M2 | Core banking, authentication, ownership, idempotency, notification, dan audit dipertahankan |
+| Integration foundation | PostgreSQL 18, Redis 8.2, RabbitMQ 4.1 Testcontainers dengan dynamic property dan Flyway V1-V8 |
+| Banking/security flow | Authenticated flow, ownership, rollback, error contract, OpenAPI, dan secret redaction diuji lintas stack |
+| Concurrency | Invariant saldo, concurrent idempotency, serta deterministic account lock ordering diuji |
+| Transactional outbox | Event durable satu transaction dengan bisnis; claim lease, publisher confirm, retry/backoff, DEAD, retention |
+| Consumer idempotency | Notification/audit memakai unique key dan `ON CONFLICT DO NOTHING`; redelivery tidak menggandakan data |
+| Observability | Actuator aman, liveness/readiness, correlation ID, transfer/outbox metrics, dan backlog gauge |
+| Performance | Workload reproducible, HTTP baseline, JFR/thread profiling, serta PostgreSQL query plan terdokumentasi |
+| Technical debt | TD-01, TD-02, TD-03 selesai; TD-04 dan TD-05 ditunda dengan bukti dan trigger evaluasi |
+| Automation/Linux | Script dev/test/integration/health/reset aman; shebang, executable bit, dan LF diverifikasi |
+| CI/quality | Java 25 GitHub Actions, wrapper checksum, unit/integration job, compiler lint, Checkstyle, SpotBugs, JaCoCo |
+| Test utama | 95 unit/MVC + 24 integration; 0 failure, 0 error, 0 skipped |
 
 ## Runtime verification
 
-- Flyway memvalidasi tujuh migration dan menerapkan V7 pada PostgreSQL 18.6.
+- Flyway menerapkan delapan migration sampai V8 dari database kosong PostgreSQL 18.
 - Hibernate schema validation lulus.
-- Redis dan RabbitMQ container healthy; aplikasi terkoneksi ke keduanya.
-- Smoke flow membuat dua user, login, dua rekening, deposit, dan transfer sukses.
-- Transfer event nyata menghasilkan `TRANSFER_COMPLETED:2` pada tabel notification.
-- Audit nyata menghasilkan `USER_LOGIN:2`, `ACCOUNT_CREATED:2`, dan `TRANSFER_COMPLETED:1` untuk flow tersebut.
-- Rabbit consumer menggunakan insert `ON CONFLICT DO NOTHING`, sehingga redelivery tidak menggandakan record.
+- Testcontainers memulai PostgreSQL, Redis, dan RabbitMQ terisolasi pada port dinamis.
+- Authentication, account, deposit/withdrawal, history, transfer, ownership, logout, dan OpenAPI flow lulus.
+- RabbitMQ outage tetap meninggalkan event `PENDING`; recovery mempublish backlog dan consumer tetap idempotent.
+- Concurrent transfer menjaga total saldo, mencegah saldo negatif/lost update, dan tidak menggandakan transfer.
+- `clean verify -Pintegration,quality` lulus: Surefire 95 dan Failsafe 24 test, Checkstyle 0 violation, SpotBugs 0 bug, compiler tanpa warning.
 
 ## Security dan consistency
 
@@ -39,8 +38,8 @@ PostgreSQL 18 adalah satu-satunya relational database. MariaDB tidak ada pada de
 - DTO auth meredaksi password dan bearer token dari `toString()`/debug log.
 - Public registration selalu CUSTOMER; admin hanya melalui bootstrap environment.
 - Transfer, histori debit/credit, dan durable idempotency record berada dalam satu transaction.
-- Completion event dikirim melalui listener `AFTER_COMMIT`; rollback tidak menghasilkan completion.
-- Publish failure sesudah commit dicatat dan tidak mengubah transfer committed menjadi error palsu.
+- Completion event disimpan ke outbox dalam transaction transfer; rollback tidak meninggalkan completion.
+- Publish failure tidak mengubah transfer committed menjadi error palsu dan dipulihkan melalui retry durable.
 - Event dan audit tidak membawa password, token, atau infrastructure secret.
 
 ## RabbitMQ topology
@@ -53,13 +52,14 @@ ledgerbank.events (topic, durable)
 
 Routing key aktif: `user.login`, `account.created`, `transfer.completed`, dan `transfer.failed`.
 
-## Batas menuju Milestone 3
+## Performance dan keputusan optimasi
 
-Milestone 2 selesai. Pekerjaan berikut tetap berada di Milestone 3:
+- History baseline: 218,60 req/s, p95 27,77 ms, error 0%.
+- Transfer baseline: 65,13 req/s, p95 87,76 ms, error 0%.
+- Query page pertama 0,074 ms, count 0,658 ms, dan offset 900 0,629 ms pada dataset analisis; index yang ada dipakai.
+- Tidak dibuat index baru karena tidak ada bottleneck database terukur. Risiko pagination sangat dalam dicatat sebagai TD-04.
+- Hot-account experiment menunjukkan Hikari pending peak 63 dan lock contention; invariant tetap aman. Tuning ditunda sampai ada SLO/deployment target (TD-05).
 
-- PostgreSQL, Redis, dan RabbitMQ Testcontainers;
-- integration/concurrency test yang diperluas;
-- durable transactional outbox sebagai peningkatan recovery publish;
-- Actuator, observability, performance profiling, CI, dan quality tooling.
+## Release state
 
-Milestone 3 harus tetap menggunakan PostgreSQL Testcontainers, bukan MariaDB.
+Repository siap sebagai release candidate Milestone 3 setelah verifikasi lokal lengkap. Workflow CI sudah dikonfigurasi, tetapi tag `v1.0.0` tidak dibuat atau dipush otomatis. Tag hanya boleh dibuat secara sadar setelah commit final berada pada working tree bersih, remote GitHub Actions untuk commit tersebut lulus, migration database kosong berhasil, dan pemeriksaan secret selesai.

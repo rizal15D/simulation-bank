@@ -1,6 +1,6 @@
 # Database PostgreSQL 18
 
-PostgreSQL 18 adalah satu-satunya relational database LedgerBank. Referensi MariaDB pada rancangan awal Milestone 2/3 tidak digunakan. Integration test Milestone 3 juga harus memakai PostgreSQL Testcontainers.
+PostgreSQL 18 adalah satu-satunya relational database LedgerBank. Referensi MariaDB pada rancangan awal Milestone 2 tidak digunakan. Integration test memakai image PostgreSQL 18 melalui Testcontainers.
 
 Schema dibuat oleh Flyway dari `src/main/resources/db/migration/postgresql`. Hibernate menggunakan `spring.jpa.hibernate.ddl-auto=validate`, sehingga aplikasi tidak membuat atau mengubah schema secara otomatis.
 
@@ -15,6 +15,7 @@ Schema dibuat oleh Flyway dari `src/main/resources/db/migration/postgresql`. Hib
 | V5 | `app_users`, `transfer_idempotency`, constraint dan indeks |
 | V6 | Menyelaraskan tipe `request_hash` menjadi `VARCHAR(64)` |
 | V7 | `notifications`, `audit_logs`, idempotency constraint dan indeks consumer |
+| V8 | `outbox_events`, delivery state, retry/retention index, dan constraint lifecycle |
 
 V6 sengaja migration baru, bukan edit pada V5 yang sudah dapat diterapkan, agar checksum dan histori Flyway tetap aman.
 
@@ -30,6 +31,7 @@ V6 sengaja migration baru, bukan edit pada V5 yang sudah dapat diterapkan, agar 
 | `transfer_idempotency` | Mapping durable actor + idempotency key ke request hash dan transfer ID |
 | `notifications` | Notification transfer per event/customer; unique untuk redelivery safety |
 | `audit_logs` | Audit event kritis; event ID unik, actor, action, resource, dan metadata non-secret |
+| `outbox_events` | Event durable; payload JSON, routing key, status, attempt, lease/retry time, publish time, dan error terakhir |
 
 Semua primary key dan foreign key domain menggunakan UUID. Timestamp memakai `TIMESTAMPTZ` dan dipetakan ke Java `Instant`.
 
@@ -70,6 +72,14 @@ RabbitMQ memiliki delivery semantics at-least-once. Karena itu `notifications` m
 
 Audit metadata disimpan sebagai JSON string di kolom `TEXT` dan hanya berasal dari metadata event yang sudah dibatasi. Password, bearer token, Redis key, dan infrastructure secret tidak menjadi bagian event atau audit row.
 
+## Transactional outbox
+
+`outbox_events.id` menggunakan `eventId`, sehingga event bisnis dan row outbox memiliki identitas yang sama. Status dibatasi menjadi `PENDING`, `PUBLISHED`, atau `DEAD`. Constraint memastikan `published_at` hanya terisi pada status `PUBLISHED`; `attempt_count` tidak boleh negatif.
+
+Index partial `(next_attempt_at, created_at)` hanya mencakup row `PENDING` dan mendukung claim batch `FOR UPDATE SKIP LOCKED`. Index partial `published_at` hanya mencakup row `PUBLISHED` untuk retention cleanup. Claim menggeser `next_attempt_at` ke deadline lease dalam transaction pendek. Publish RabbitMQ terjadi di luar transaction tersebut, kemudian acknowledgement sukses/gagal ditulis melalui transaction pendek dengan pemeriksaan deadline claim agar worker lama tidak menimpa claim baru.
+
+Event bisnis disimpan dalam transaction yang sama dengan perubahan sumbernya: account creation dan transfer completion rollback bersama operasi bisnis; login dan transfer failure memakai transaction event tersendiri setelah hasil terkait diketahui. Broker outage tidak membatalkan perubahan bisnis yang sudah durable. Event tetap `PENDING`, di-retry dengan backoff, dan menjadi `DEAD` setelah batas attempt.
+
 ## Histori dan uang
 
 - `DEPOSIT`: `balance_after = balance_before + amount`, tanpa transfer ID.
@@ -83,7 +93,7 @@ Service mengunci account dengan pessimistic write lock sebelum mutasi. Dua accou
 
 ## Environment
 
-Compose development menyediakan PostgreSQL 18 pada port host default 5432 dengan named volume. Profile `test` menyediakan PostgreSQL 18 database `ledgerbank_test` pada port 5433 dan tmpfs.
+Compose development menyediakan PostgreSQL 18 pada port host default 5432 dengan named volume. Integration profile membuat PostgreSQL 18 container terisolasi pada port dinamis, menjalankan seluruh migration V1-V8 dari database kosong, lalu membiarkan Hibernate memvalidasi schema.
 
 Konfigurasi:
 

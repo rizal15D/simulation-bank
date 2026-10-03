@@ -2,7 +2,34 @@
 
 LedgerBank adalah simulator core banking edukasional berbasis Java. Aplikasi menyediakan registrasi dan login, rekening IDR, deposit, withdrawal, transfer internal atomik, histori transaksi, ownership enforcement, dan perlindungan idempotency. Aplikasi tidak terhubung ke bank atau payment rail dan tidak ditujukan untuk transaksi finansial produksi.
 
-Implementasi mencakup Milestone 1 dan Milestone 2 lengkap: authentication, authorization, account ownership, Swagger/OpenAPI, Redis, transfer idempotency, RabbitMQ event publication, notification consumer, audit trail, dan environment profiles.
+## Why this project exists
+
+Project ini adalah portfolio backend engineering untuk memperlihatkan konsistensi transaksi, security boundary, reliability event, observability, pengujian lintas infrastructure, serta optimasi berbasis bukti. LedgerBank bukan sistem perbankan production dan tidak menyatakan compliance, availability, security certification, atau kapasitas yang belum dibuktikan.
+
+Implementasi mencakup Milestone 1-3:
+
+- M1: customer, rekening, deposit, withdrawal, transfer atomik, dan histori transaksi;
+- M2: authentication, role dan ownership, OpenAPI, Redis session/idempotency, RabbitMQ, notification, dan audit;
+- M3: Testcontainers integration/concurrency suite, transactional outbox, Actuator/Micrometer, correlation logging, performance/JVM/database analysis, automation, Linux compatibility, CI, dan quality checks.
+
+## Arsitektur ringkas
+
+```mermaid
+flowchart LR
+    Client --> Security[Spring Security]
+    Security --> App[Modular monolith]
+    App --> PG[(PostgreSQL 18)]
+    App --> Redis[(Redis 8.2)]
+    App --> Outbox[(outbox_events)]
+    Outbox --> Publisher[Outbox publisher]
+    Publisher --> Rabbit[(RabbitMQ 4.1)]
+    Rabbit --> Notification[Notification consumer]
+    Rabbit --> Audit[Audit consumer]
+    Notification --> PG
+    Audit --> PG
+```
+
+PostgreSQL adalah source of truth. Mutasi saldo, histori, transfer, durable idempotency record, dan event outbox disimpan dalam transaction boundary yang sesuai. Redis menyediakan session serta koordinasi/cache idempotency. RabbitMQ mengirim event secara at-least-once; consumer PostgreSQL idempotent mencegah duplikasi akibat redelivery.
 
 ## Stack
 
@@ -11,7 +38,8 @@ Implementasi mencakup Milestone 1 dan Milestone 2 lengkap: authentication, autho
 - PostgreSQL 18 dan Flyway. PostgreSQL adalah satu-satunya relational database; tidak ada MariaDB.
 - Redis 8.2 untuk opaque authentication session dan transfer idempotency.
 - RabbitMQ 4.1 untuk banking event, notification, dan audit processing asynchronous.
-- springdoc-openapi 3.1.1, JUnit Jupiter 6, Mockito, Spring MVC Test.
+- Spring Boot Actuator, Micrometer, dan Prometheus registry untuk health dan metrics.
+- springdoc-openapi 3.1.1, JUnit Jupiter 6, Mockito, Spring MVC Test, dan Testcontainers.
 
 ## Menjalankan aplikasi
 
@@ -42,7 +70,7 @@ docker compose up -d --wait redis rabbitmq
 .\mvnw.cmd spring-boot:run
 ```
 
-Flyway menjalankan migration V1-V7 saat startup dan Hibernate hanya memvalidasi schema.
+Flyway menjalankan migration V1-V8 saat startup dan Hibernate hanya memvalidasi schema.
 
 ## Authentication dan authorization
 
@@ -108,7 +136,17 @@ RabbitMQ mendeklarasikan topology durable saat aplikasi startup:
 | Binding | `transfer.*` ke notification |
 | Binding | `#` ke audit |
 
-Event `USER_LOGIN`, `ACCOUNT_CREATED`, `TRANSFER_COMPLETED`, dan `TRANSFER_FAILED` dipublish sebagai JSON. Event transactional dikirim setelah database commit. Notification consumer menyimpan notification transfer untuk customer sumber dan tujuan; audit consumer menyimpan seluruh event. Kedua consumer memakai insert idempotent agar redelivery tidak menggandakan record.
+Event `USER_LOGIN`, `ACCOUNT_CREATED`, `TRANSFER_COMPLETED`, dan `TRANSFER_FAILED` diserialisasi sebagai JSON ke tabel `outbox_events` dalam transaction database. Publisher terjadwal meng-claim batch dalam transaction singkat, mengirim di luar transaction dengan publisher confirm, lalu menandai event `PUBLISHED` atau menjadwalkan retry exponential-backoff. Setelah delapan kegagalan, event menjadi `DEAD` untuk investigasi. Claim lease memulihkan event bila proses berhenti di tengah publish.
+
+Notification consumer menyimpan notification transfer untuk customer sumber dan tujuan; audit consumer menyimpan seluruh event. Keduanya memakai insert idempotent agar redelivery tidak menggandakan record. Semantik delivery end-to-end adalah at-least-once, bukan exactly-once.
+
+## Observability
+
+- `GET /actuator/health`, liveness, readiness, dan info dapat diakses publik tanpa detail sensitif.
+- `GET /actuator/metrics` dan `/actuator/prometheus` hanya dapat diakses ADMIN.
+- Readiness memeriksa application state, PostgreSQL, dan Redis. RabbitMQ sengaja tidak menggagalkan readiness karena transaksi tetap dapat commit ke outbox saat broker offline.
+- Header `X-Correlation-ID` divalidasi/dibuat untuk setiap request, dikembalikan pada response, dan masuk MDC log.
+- Metric bisnis mencakup hasil/durasi transfer, outbox publish/retry/dead, delivery time, dan backlog per status.
 
 ## Konfigurasi
 
@@ -125,6 +163,11 @@ Lihat `.env.example`. Variabel utama:
 | `AUTH_SESSION_TTL` | `PT8H` |
 | `TRANSFER_IDEMPOTENCY_TTL` | `PT24H` |
 | `TRANSFER_IDEMPOTENCY_LOCK_TTL` | `PT30S` |
+| `OUTBOX_BATCH_SIZE` / `OUTBOX_POLL_INTERVAL` | `50` / `PT0.5S` |
+| `OUTBOX_MAX_ATTEMPTS` | `8` |
+| `OUTBOX_INITIAL_BACKOFF` / `OUTBOX_MAX_BACKOFF` | `PT1S` / `PT1M` |
+| `OUTBOX_CONFIRM_TIMEOUT` / `OUTBOX_CLAIM_LEASE` | `PT5S` / `PT30S` |
+| `OUTBOX_RETENTION` | `P7D` |
 | `PORT` | `8080` |
 
 Jangan commit secret. Mengubah password PostgreSQL pada Compose tidak mengubah password volume database yang sudah terinisialisasi.
@@ -133,13 +176,46 @@ Konfigurasi umum berada di `application.yml`, koneksi development di `applicatio
 
 ## Test
 
-Unit dan MVC test:
+Unit dan MVC test cepat:
 
 ```powershell
 .\mvnw.cmd test
 ```
 
-Verifikasi terakhir: 75 test, 0 failure, 0 error, 0 skipped. Smoke test runtime memakai PostgreSQL 18, Redis, dan RabbitMQ untuk membuktikan auth, ownership, logout, OpenAPI, idempotency, event publication, dua notification transfer, serta audit login/account/transfer. Integration test berbasis Testcontainers untuk PostgreSQL, Redis, dan RabbitMQ merupakan target Milestone 3; tidak ada rencana menambahkan MariaDB.
+Verifikasi lengkap dengan PostgreSQL 18, Redis 8.2, dan RabbitMQ 4.1 Testcontainers serta quality profile:
+
+```powershell
+.\mvnw.cmd clean verify '-Pintegration,quality'
+```
+
+Pada Bash/Linux/WSL gunakan `./scripts/test.sh` atau `./scripts/integration-test.sh`. Verifikasi terakhir menghasilkan 95 unit/MVC test dan 24 integration test, seluruhnya tanpa failure, error, atau skip. Quality profile menjalankan compiler `-Xlint:all`, Checkstyle, SpotBugs, serta report JaCoCo unit dan integration.
+
+Integration suite mencakup authentication/ownership, rollback, durable idempotency, RabbitMQ outage/recovery, consumer idempotency, outbox recovery, dan concurrency invariant untuk saldo serta lock ordering. Container memakai port dinamis dan tidak bergantung pada Compose development.
+
+## Performance evidence
+
+Workload reproducible pada workstation baseline menghasilkan:
+
+| Flow | Throughput | p95 | Error |
+|---|---:|---:|---:|
+| History page 0, size 20 | 218,60 req/s | 27,77 ms | 0,00% |
+| Transfer | 65,13 req/s | 87,76 ms | 0,00% |
+
+Angka ini adalah baseline lokal, bukan SLA atau capacity claim. JFR/thread analysis menunjukkan hot-account contention dapat memenuhi connection pool, sementara PostgreSQL query plan menunjukkan index histori saat ini tepat untuk dataset uji. Karena belum ada bottleneck terukur, tidak dibuat migration index spekulatif. Lihat `docs/performance/` untuk environment, dataset, command, raw summary, dan keterbatasan.
+
+## Automation dan CI
+
+Script Bash di `scripts/` menyediakan startup development, test cepat, integration test, health check, dan reset database lokal yang dijaga konfirmasi/scope. `.gitattributes` memaksa LF untuk script dan Maven Wrapper pada Linux; Windows native dapat memakai `mvnw.cmd`.
+
+Workflow GitHub Actions memakai Java 25 di Ubuntu, memvalidasi Maven Wrapper beserta checksum distribusi, menjalankan build/unit/quality, lalu integration suite Testcontainers. Report test failure dan report quality unit diunggah sebagai artifact. Detail penggunaan lokal ada di `docs/development.md`.
+
+## Known limitations
+
+- Notification dan audit belum memiliki endpoint publik; data tersedia sebagai persistence internal.
+- Histori masih memakai offset pagination dan exact count; keyset pagination ditunda sampai dataset/SLO membuktikan kebutuhan.
+- Hot account dapat menaikkan tail latency serta pressure pada worker/connection pool; tuning/rate limiting memerlukan target deployment.
+- Tidak ada multi-region deployment, disaster-recovery exercise, external payment rail, fraud engine, atau compliance certification.
+- Management endpoint hanya cocok dengan boundary aplikasi saat ini; deployment publik tetap memerlukan TLS, network policy, secret manager, monitoring, dan hardening operasional.
 
 ## Struktur
 
@@ -150,12 +226,12 @@ src/main/java/com/example/ledgerbank/
   account/        rekening dan ownership-aware query
   transaction/    deposit, withdrawal, histori
   transfer/       transfer atomik, idempotency Redis/PostgreSQL
-  event/          banking event model dan publisher pasca-commit
+  event/          banking event, transactional outbox, retry, dan publisher confirm
   notification/   RabbitMQ consumer dan notification persistence
   audit/          RabbitMQ consumer dan audit trail
-  common/config/  Spring Security, OpenAPI, RabbitMQ topology
+  common/         error, correlation ID, metrics, security, OpenAPI, RabbitMQ
 src/main/resources/db/migration/postgresql/
-  V1-V7
+  V1-V8
 ```
 
 Dokumentasi lanjutan:
@@ -167,3 +243,9 @@ Dokumentasi lanjutan:
 - [Banking events](docs/events.md)
 - [Redis](docs/redis.md)
 - [Status implementasi](docs/IMPLEMENTATION_STATUS.md)
+- [Development dan automation](docs/development.md)
+- [Technical debt](docs/technical-debt.md)
+- [Performance baseline](docs/performance/baseline.md)
+- [JVM/thread profiling](docs/performance/jvm-analysis.md)
+- [Database analysis](docs/performance/database-analysis.md)
+- [Spesifikasi Milestone 3](docs/PROJECT_SPEC_MILESTONE_3.md)

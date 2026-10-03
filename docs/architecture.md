@@ -1,4 +1,4 @@
-# Arsitektur Milestone 2
+# Arsitektur LedgerBank setelah Milestone 3
 
 LedgerBank tetap berupa modular monolith dengan package-by-feature. PostgreSQL 18 adalah satu-satunya relational database untuk seluruh milestone. Redis dan RabbitMQ adalah infrastructure pendukung, bukan pengganti source of truth PostgreSQL.
 
@@ -15,13 +15,17 @@ flowchart TD
     Idem --> Redis
     Idem --> PG
     Banking --> Events[Transactional banking events]
-    Events -->|after commit| Rabbit[(RabbitMQ)]
+    Events --> Outbox[(PostgreSQL outbox_events)]
+    Outbox --> Publisher[Claim / publish / acknowledge]
+    Publisher -->|publisher confirm| Rabbit[(RabbitMQ)]
     Rabbit --> Notify[Notification consumer]
     Rabbit --> Audit[Audit consumer]
     Notify --> PG
     Audit --> PG
     RabbitConfig[Rabbit topology initializer] --> Rabbit[(RabbitMQ)]
-    Flyway[Flyway V1-V7] --> PG
+    Metrics[Actuator / Micrometer] --> Banking
+    Metrics --> Publisher
+    Flyway[Flyway V1-V8] --> PG
 ```
 
 ## Package dan tanggung jawab
@@ -33,7 +37,7 @@ flowchart TD
 | `account` | Pembukaan dan query rekening dengan ownership enforcement |
 | `transaction` | Deposit, withdrawal, histori, pessimistic account locking |
 | `transfer` | Transfer internal atomik, Redis lock/cache, durable idempotency record |
-| `event` | Event model dan publisher RabbitMQ setelah database commit |
+| `event` | Event model, outbox persistence, claim lease, retry/backoff, publisher confirm, retention |
 | `notification` | Idempotent transfer notification consumer dan persistence |
 | `audit` | Idempotent audit consumer untuk aktivitas kritis |
 | `common/config` | Spring Security filter chain, OpenAPI, RabbitMQ topology |
@@ -117,7 +121,7 @@ Fingerprint mencakup source, destination, nominal yang sudah dinormalisasi, dan 
 
 Redis mengurangi duplicate work dan mengoordinasikan request simultan. PostgreSQL memberikan durability: transfer dan idempotency record di-commit bersama. Jika penulisan cache setelah commit gagal, response tetap sukses dan retry berikutnya menemukan record database. Jika Redis gagal sebelum mutasi, operasi ditolak 503 agar protection tidak di-bypass.
 
-## RabbitMQ
+## Transactional outbox dan RabbitMQ
 
 Aplikasi membuat koneksi RabbitMQ dan mendeklarasikan:
 
@@ -127,14 +131,22 @@ ledgerbank.events (durable topic exchange)
   +-- #          -> ledgerbank.audit        (durable queue)
 ```
 
-Deklarasi dijalankan saat application startup melalui `RabbitAdmin`. Event dikirim sebagai JSON dengan routing key `user.login`, `account.created`, `transfer.completed`, atau `transfer.failed`.
+Deklarasi dijalankan saat application startup melalui `RabbitAdmin`. Event disimpan sebagai JSON dengan routing key `user.login`, `account.created`, `transfer.completed`, atau `transfer.failed`.
 
-Event transaksi diterbitkan melalui `TransactionalEventListener(AFTER_COMMIT)`. Transfer yang rollback tidak menghasilkan completion event dan idempotent replay tidak menerbitkan completion kedua. Publish failure setelah commit dicatat tanpa mengubah operasi database yang sudah sukses menjadi kegagalan palsu.
+Producer tidak mengandalkan callback in-memory setelah commit. `BankingEventPublisher` menyimpan event ke `outbox_events` di transaction PostgreSQL yang sama dengan perubahan bisnis. Transfer yang rollback tidak meninggalkan completion event dan idempotent replay tidak membuat completion kedua.
+
+Scheduler meng-claim event `PENDING` dengan `FOR UPDATE SKIP LOCKED` dan claim lease dalam transaction singkat. Network I/O ke RabbitMQ dilakukan setelah transaction claim selesai. Publisher menunggu broker confirm, lalu memakai transaction pendek untuk menandai `PUBLISHED`; kegagalan memakai exponential backoff sampai batas attempt dan akhirnya `DEAD`. Jika proses berhenti setelah publish tetapi sebelum acknowledgement database, lease habis dan event dapat dikirim ulang. Karena itu pipeline bersifat at-least-once dan consumer wajib idempotent.
 
 `NotificationConsumer` menerima `transfer.*`, mengabaikan event selain completion, lalu menyimpan satu notification per customer berbeda. `AuditConsumer` menerima seluruh routing key. Unique constraint dan PostgreSQL `ON CONFLICT DO NOTHING` membuat kedua consumer aman terhadap redelivery.
 
-## Konsistensi dengan Milestone 3
+## Observability dan health boundary
 
-Milestone 3 harus mempertahankan PostgreSQL, bukan menggantinya dengan MariaDB. Rencana integration test menggunakan PostgreSQL Testcontainers ditambah Redis dan RabbitMQ Testcontainers, termasuk verifikasi publication/consumption nyata. Pessimistic locking yang sudah ada menjadi baseline untuk concurrency test, bukan alasan melewati test tersebut.
+Correlation filter menerima `X-Correlation-ID` yang valid atau membuat UUID baru, memasukkannya ke response dan MDC, lalu membersihkan MDC setelah request. Micrometer merekam outcome/reason dan durasi transfer, jumlah outbox published/retry/dead, delivery time, serta backlog `PENDING`/`DEAD`.
 
-Observability, profiling, CI, performance baseline, dan Testcontainers belum ditarik maju ke pekerjaan ini agar batas milestone tetap jelas.
+Actuator hanya mengekspos health, info, metrics, dan Prometheus. Health/info publik tidak menampilkan detail tanpa role ADMIN; metrics dan Prometheus memerlukan ADMIN. Readiness mencakup application state, PostgreSQL, dan Redis. RabbitMQ tidak menjadi readiness dependency karena broker outage tidak boleh mencegah transaksi durable masuk ke outbox; kondisi delivery terlihat dari metrics dan backlog.
+
+## Verification boundary
+
+Unit/MVC test berjalan melalui Surefire. Integration dan concurrency test berjalan melalui Failsafe dengan PostgreSQL 18, Redis 8.2, dan RabbitMQ 4.1 Testcontainers. Suite membuktikan authentication/ownership, rollback, durable idempotency, lock ordering, invariant saldo, broker outage/recovery, serta consumer idempotency. Quality profile menambahkan compiler warnings, Checkstyle, SpotBugs, dan report JaCoCo.
+
+Performance workload, JFR/thread profiling, dan PostgreSQL query plan disimpan sebagai evidence di `docs/performance/`. Hasil tersebut dipakai untuk menolak optimasi spekulatif serta mencatat risiko offset pagination dan hot-account contention di technical debt.

@@ -29,6 +29,14 @@ Security filter chain memeriksa role dan service memeriksa ownership objek. Untu
 
 Registrasi publik tidak menerima role. Admin opsional hanya dibuat saat startup jika `APP_ADMIN_EMAIL` dan `APP_ADMIN_PASSWORD` diisi.
 
+## Management dan log boundary
+
+Actuator health, liveness, readiness, dan info dapat diakses tanpa token tetapi detail health hanya ditampilkan kepada ADMIN. Metrics dan Prometheus memerlukan role ADMIN; management path lain ditolak. Environment detail pada info endpoint dinonaktifkan.
+
+Setiap request menerima correlation ID yang tervalidasi panjang/karakternya atau UUID buatan server. Nilai masuk response dan MDC log, lalu dibersihkan setelah request agar tidak bocor ke request thread berikutnya. Correlation ID membantu penelusuran, bukan credential atau authorization token.
+
 ## Data yang tidak boleh masuk audit
 
 Audit event tidak memuat password, bearer token, Redis key, atau secret infrastructure. Metadata event hanya berisi identifier operasional, nominal transfer, currency, dan failure code yang sudah disanitasi.
+
+Unit/MVC dan integration test memverifikasi anonymous/authenticated/ADMIN access pada management endpoint, ownership lintas-customer, redaksi DTO serta log, dan bahwa error response tidak mengekspos secret infrastructure.

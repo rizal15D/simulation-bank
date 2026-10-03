@@ -37,6 +37,25 @@ Full verification with Testcontainers:
 
 The integration suite starts isolated PostgreSQL, Redis, and RabbitMQ containers on dynamic ports. Docker must be reachable, but the development Compose stack does not need to be running.
 
+Run the same verification and quality gates used by CI:
+
+~~~bash
+./mvnw clean verify -Pintegration,quality
+~~~
+
+The quality profile enables all Java compiler lint warnings, Checkstyle, SpotBugs, and separate JaCoCo reports for unit/MVC and integration coverage. Generated reports are available under:
+
+~~~text
+target/checkstyle-result.xml
+target/spotbugsXml.xml
+target/site/jacoco/index.html
+target/site/jacoco-it/index.html
+target/surefire-reports/
+target/failsafe-reports/
+~~~
+
+The last verified suite contains 95 unit/MVC tests and 24 integration tests. Integration tests create all dependencies through Testcontainers, apply Flyway V1-V8 from an empty PostgreSQL database, and isolate RabbitMQ queues between test methods.
+
 Extra Maven arguments can be appended to either script:
 
 ~~~bash
@@ -106,3 +125,11 @@ On Windows, run the shell files from Git Bash or WSL. Docker Desktop must be ava
 | **RABBITMQ_*** | Local RabbitMQ connection | see **.env.example** |
 
 Keep **.env** local. It is ignored by Git; never commit real credentials or tokens.
+
+## Continuous integration
+
+**.github/workflows/ci.yml** runs on pushes and pull requests using Ubuntu and Temurin Java 25. The build job validates the committed Maven Wrapper URL/checksum, packages the application, runs unit/MVC tests, and applies the quality profile. A dependent job runs the Testcontainers integration suite with Docker on the runner.
+
+Failure reports are uploaded with short retention. Unit quality reports are uploaded on every build. The workflow uses read-only repository contents permission and cancels superseded runs for the same ref.
+
+Local success proves the repository state and Docker-backed suite; it does not imply that an unpushed commit has passed remote GitHub Actions. Create a release tag only after the corresponding remote CI run passes on a clean tree.

@@ -23,6 +23,10 @@ Lock dilepas dengan Lua compare-and-delete agar request lain tidak dapat menghap
 
 Record durable `(actor_id, idempotency_key, request_hash, transfer_id)` tetap disimpan atomik di PostgreSQL. Bila cache result hilang, retry dipulihkan dari database. Bila Redis gagal sebelum mutasi, transfer ditolak 503 agar idempotency tidak pernah dibypass. Bila cache write gagal setelah commit, transfer tetap sukses karena record PostgreSQL sudah tersedia.
 
+Readiness memasukkan Redis karena authentication dan koordinasi idempotency tidak dapat bekerja aman tanpanya. Integration test memakai Redis 8.2 Testcontainers dan membuktikan cache loss/durable replay, concurrent key yang sama, payload conflict, serta fail-closed 503 sebelum mutasi.
+
 ## Development
 
 Compose menjalankan Redis authenticated pada port host `6380`, memakai AOF dan named volume. Konfigurasi ada di `application-local.yml` dan dapat dioverride melalui `REDIS_HOST`, `REDIS_PORT`, serta `REDIS_PASSWORD`.
+
+Testcontainers integration tidak memakai port 6380 atau data Compose; container dan property dibuat dinamis agar suite terisolasi serta dapat berjalan paralel dengan environment development.
