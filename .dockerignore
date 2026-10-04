@@ -1,0 +1,16 @@
+.git
+.github
+.idea
+.m2
+.tools
+.vscode
+target
+.env
+docs
+performance
+scripts
+src/test
+*.iml
+*.log
+README.md
+compose.yaml

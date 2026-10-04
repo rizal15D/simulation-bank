@@ -14,6 +14,18 @@ The scripts resolve the repository root from their own location, so they can be 
 
 The local profile and Compose file have development-only defaults. Copy **.env.example** when ports or credentials need to be overridden:
 
+To build and run the application and all dependencies in Docker, only Docker Compose v2 is required:
+
+~~~bash
+cp .env.example .env
+docker compose up --build -d --wait
+docker compose logs -f app
+~~~
+
+The API is exposed at **http://localhost:8080** by default. Run **docker compose down** to stop the stack. PostgreSQL, Redis, and RabbitMQ data remain in named volumes unless they are explicitly removed.
+
+For a local Java development loop, JDK 25 and Bash are also required:
+
 ~~~bash
 cp .env.example .env
 ./scripts/dev.sh

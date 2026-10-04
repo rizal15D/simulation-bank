@@ -45,6 +45,47 @@ services:
       timeout: 45s
       retries: 10
       start_period: 60s
+  app:
+    image: ledgerbank:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      PORT: 8080
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ledgerbank
+      DB_USERNAME: ledgerbank
+      DB_PASSWORD: ${DB_PASSWORD:-ledgerbank}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-ledgerbank}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-ledgerbank}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-ledgerbank}
+      AUTH_SESSION_TTL: ${AUTH_SESSION_TTL:-PT8H}
+      TRANSFER_IDEMPOTENCY_TTL: ${TRANSFER_IDEMPOTENCY_TTL:-PT24H}
+      TRANSFER_IDEMPOTENCY_LOCK_TTL: ${TRANSFER_IDEMPOTENCY_LOCK_TTL:-PT30S}
+      APP_ADMIN_EMAIL: ${APP_ADMIN_EMAIL:-}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD:-}
+    ports:
+      - "127.0.0.1:${PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "5", "http://localhost:8080/actuator/health/liveness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
   postgres-test:
     image: postgres:18
     profiles: ["test"]

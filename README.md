@@ -43,11 +43,19 @@ PostgreSQL adalah source of truth. Mutasi saldo, histori, transfer, durable idem
 
 ## Menjalankan aplikasi
 
-Prasyarat: JDK 25 dan Docker Desktop.
+Untuk menjalankan seluruh stack hanya dengan Docker, prasyaratnya cukup Docker Desktop dengan Docker Compose v2:
 
 ```powershell
 Copy-Item .env.example .env
-docker compose up -d --wait
+docker compose up --build -d --wait
+```
+
+Perintah tersebut membangun image LedgerBank, lalu menjalankan aplikasi, PostgreSQL, Redis, dan RabbitMQ. API tersedia di [http://localhost:8080](http://localhost:8080). Lihat log aplikasi dengan `docker compose logs -f app` dan hentikan stack dengan `docker compose down`.
+
+Untuk development dengan aplikasi berjalan langsung dari host, gunakan JDK 25 dan jalankan hanya infrastrukturnya melalui Docker:
+
+```powershell
+docker compose up -d --wait postgres redis rabbitmq
 .\mvnw.cmd spring-boot:run
 ```
 
