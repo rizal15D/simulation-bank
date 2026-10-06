@@ -256,4 +256,3 @@ Dokumentasi lanjutan:
 - [Performance baseline](docs/performance/baseline.md)
 - [JVM/thread profiling](docs/performance/jvm-analysis.md)
 - [Database analysis](docs/performance/database-analysis.md)
-- [Spesifikasi Milestone 3](docs/PROJECT_SPEC_MILESTONE_3.md)

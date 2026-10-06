@@ -1,5 +1,4 @@
 docs/*
-!docs/PROJECT_SPEC_MILESTONE_3.md
 !docs/architecture.md
 !docs/database.md
 !docs/api.md
